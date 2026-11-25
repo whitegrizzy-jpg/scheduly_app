@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../constants/app_colors.dart';
+import '../services/app_services.dart';
+import '../services/auth_service.dart';
 
 enum ScreenMode { login, signup, find }
 
@@ -13,8 +15,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // 계정 정보는 소스에 두지 않는다. 실제 인증은 MP3에서 BaaS(Firebase Auth)로 연결한다.
-  // MP1·MP2 단계에서는 아이디·비밀번호가 입력되기만 하면 데모 모드로 진입한다.
+  // 계정 정보는 소스에 두지 않는다.
+  // - Firebase 설정(.env)이 있으면: Firebase Authentication 이메일·비밀번호 로그인 → 클라우드 동기화
+  // - 없으면: 아이디·비밀번호가 입력되기만 하면 로컬 전용(데모) 모드로 진입
 
   final TextEditingController _idController = TextEditingController();
   final TextEditingController _pwController = TextEditingController();
@@ -22,6 +25,9 @@ class _LoginScreenState extends State<LoginScreen> {
   String _error = '';
   ScreenMode _mode = ScreenMode.login;
   bool _showPw = false;
+  bool _busy = false;
+
+  bool get _cloud => AppServices.firebaseReady;
 
   @override
   void dispose() {
@@ -30,20 +36,44 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _handleLogin() {
-    if (_idController.text.trim().isNotEmpty && _pwController.text.isNotEmpty) {
+  Future<void> _handleLogin() async {
+    if (_busy) return;
+    final id = _idController.text.trim();
+    final pw = _pwController.text;
+    if (id.isEmpty || pw.isEmpty) {
       setState(() {
-        _error = '';
+        _error = _cloud ? '이메일과 비밀번호를 입력해주세요.' : '아이디와 비밀번호를 입력해주세요.';
       });
+      return;
+    }
+    setState(() {
+      _error = '';
+      _busy = true;
+    });
+    try {
+      if (_cloud) {
+        final user = await AuthService.signIn(id, pw);
+        await AppServices.startCloudSession(user);
+      } else {
+        await AppServices.startLocalSession();
+      }
+      if (!mounted) return;
       widget.onLogin();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('로그인되었습니다.')),
+        SnackBar(
+          content: Text(_cloud ? '로그인되었습니다. 서버와 동기화합니다.' : '로그인되었습니다.'),
+        ),
       );
-    } else {
-      setState(() {
-        _error = '아이디와 비밀번호를 입력해주세요.';
-      });
+    } on AuthFailure catch (e) {
+      setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _startLocal() async {
+    await AppServices.startLocalSession();
+    widget.onLogin();
   }
 
   @override
@@ -129,16 +159,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       children: [
                         // ID Field Row
                         _buildInputRow(
-                          label: '아이디',
+                          label: _cloud ? '이메일' : '아이디',
                           child: TextField(
+                            key: const Key('login_id'),
                             controller: _idController,
+                            keyboardType: _cloud ? TextInputType.emailAddress : TextInputType.text,
                             onChanged: (_) {
                               if (_error.isNotEmpty) setState(() => _error = '');
                             },
                             onSubmitted: (_) => _handleLogin(),
                             style: const TextStyle(fontSize: 14, color: AppColors.text),
                             decoration: _inputDecoration(
-                              hintText: '아이디 입력',
+                              hintText: _cloud ? 'test@example.com' : '아이디 입력',
                               hasError: _error.isNotEmpty,
                             ),
                           ),
@@ -149,6 +181,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         _buildInputRow(
                           label: '비밀번호',
                           child: TextField(
+                            key: const Key('login_pw'),
                             controller: _pwController,
                             obscureText: !_showPw,
                             onChanged: (_) {
@@ -217,7 +250,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const Spacer(),
                             ElevatedButton(
-                              onPressed: _handleLogin,
+                              key: const Key('login_button'),
+                              onPressed: _busy ? null : _handleLogin,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppColors.primary,
                                 foregroundColor: Colors.white,
@@ -236,17 +270,19 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
 
                   const SizedBox(height: 16),
-                  const Text(
-                    '데모 모드: 아무 아이디·비밀번호나 입력하면 시작합니다',
+                  Text(
+                    _cloud
+                        ? '☁️ 클라우드 모드: 같은 계정으로 로그인한 기기끼리 목록이 동기화됩니다'
+                        : '데모 모드: 아무 아이디·비밀번호나 입력하면 시작합니다',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 12, color: AppColors.muted),
+                    style: const TextStyle(fontSize: 12, color: AppColors.muted),
                   ),
                   TextButton(
                     key: const Key('demo_start'),
-                    onPressed: widget.onLogin,
-                    child: const Text(
-                      '로그인 없이 둘러보기',
-                      style: TextStyle(fontSize: 13, color: AppColors.primary, fontWeight: FontWeight.w600),
+                    onPressed: _busy ? null : _startLocal,
+                    child: Text(
+                      _cloud ? '로그인 없이 둘러보기 (이 기기에만 저장)' : '로그인 없이 둘러보기',
+                      style: const TextStyle(fontSize: 13, color: AppColors.primary, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -313,22 +349,58 @@ class SignupModal extends StatefulWidget {
 
 class _SignupModalState extends State<SignupModal> {
   final Map<String, TextEditingController> _controllers = {
-    'id': TextEditingController(),
-    'name': TextEditingController(),
     'email': TextEditingController(),
     'pw': TextEditingController(),
     'pw2': TextEditingController(),
   };
 
   bool _done = false;
+  bool _busy = false;
+  String _error = '';
 
-final _fields = const [
-    {'key': 'id', 'label': '아이디', 'ph': '사용할 아이디'},
-    {'key': 'name', 'label': '이름', 'ph': '실명'},
-    {'key': 'email', 'label': '이메일', 'ph': 'example@email.com'},
-    {'key': 'pw', 'label': '비밀번호', 'ph': '8자 이상'},
+  // 실명 등 불필요한 개인정보는 받지 않는다. (이메일은 테스트용 주소 사용 권장)
+  final _fields = const [
+    {'key': 'email', 'label': '이메일', 'ph': 'test@example.com'},
+    {'key': 'pw', 'label': '비밀번호', 'ph': '6자 이상'},
     {'key': 'pw2', 'label': '비밀번호 확인', 'ph': '다시 입력'},
   ];
+
+  Future<void> _submit() async {
+    final email = _controllers['email']!.text.trim();
+    final pw = _controllers['pw']!.text;
+    final pw2 = _controllers['pw2']!.text;
+    String err = '';
+    if (email.isEmpty || pw.isEmpty) {
+      err = '이메일과 비밀번호를 입력해주세요.';
+    } else if (pw.length < 6) {
+      err = '비밀번호는 6자 이상이어야 합니다.';
+    } else if (pw != pw2) {
+      err = '비밀번호 확인이 일치하지 않습니다.';
+    }
+    if (err.isNotEmpty) {
+      setState(() => _error = err);
+      return;
+    }
+    if (!AppServices.firebaseReady) {
+      // 로컬 전용 모드: 서버가 없으므로 화면 흐름만 보여 준다.
+      setState(() => _done = true);
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = '';
+    });
+    try {
+      await AuthService.signUp(email, pw);
+      // 가입 직후 자동 로그인 상태를 해제하고, 로그인 화면에서 직접 로그인하게 한다.
+      await AppServices.endSession();
+      if (mounted) setState(() => _done = true);
+    } on AuthFailure catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -418,7 +490,9 @@ final _fields = const [
                                   ),
                                   const SizedBox(height: 4),
                                   TextField(
+                                    key: ValueKey('signup_${f['key']}'),
                                     controller: _controllers[f['key']],
+                                    keyboardType: f['key'] == 'email' ? TextInputType.emailAddress : TextInputType.text,
                                     obscureText: isPw,
                                     style: const TextStyle(fontSize: 14, color: AppColors.text),
                                     decoration: InputDecoration(
@@ -442,11 +516,20 @@ final _fields = const [
                               ),
                             );
                           }),
+                          if (_error.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 4),
+                              child: Text(
+                                '⚠️ $_error',
+                                style: const TextStyle(fontSize: 12, color: AppColors.accent),
+                              ),
+                            ),
                           const SizedBox(height: 8),
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
-                              onPressed: () => setState(() => _done = true),
+                              key: const Key('signup_submit'),
+                              onPressed: _busy ? null : _submit,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppColors.primary,
                                 foregroundColor: Colors.white,

@@ -7,7 +7,9 @@ import 'screens/calendar_screen.dart';
 import 'screens/group_schedule_screen.dart';
 import 'screens/handwriting_screen.dart';
 import 'components/bottom_nav.dart';
-import 'data/todo_repository.dart';
+import 'services/app_services.dart';
+
+export 'services/app_services.dart';
 
 // export type Screen = 'home' | 'calendar' | 'group' | 'handwriting'
 enum ActiveScreen { home, calendar, group, handwriting }
@@ -18,13 +20,10 @@ class MockUser {
   static const String initial = 'D';
 }
 
-/// 앱 전역 서비스. 테스트에서는 [todos]를 메모리 저장소로 바꿔 끼운다.
-class AppServices {
-  static TodoRepository todos = SqfliteTodoRepository();
-}
-
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // .env(--dart-define-from-file)에 Firebase 값이 있으면 초기화, 없으면 로컬 전용 모드
+  await AppServices.init();
   runApp(const MyApp());
 }
 
@@ -55,11 +54,33 @@ class AppRoot extends StatefulWidget {
 
 class _AppRootState extends State<AppRoot> {
   bool _loggedIn = false;
+  bool _resuming = false;
   ActiveScreen _activeScreen = ActiveScreen.home;
+
+  @override
+  void initState() {
+    super.initState();
+    // 이전에 로그인한 Firebase 사용자가 있으면 로그인 화면 없이 동기화 세션을 다시 연다.
+    final user = AppServices.currentUser;
+    if (user != null) {
+      _resuming = true;
+      AppServices.startCloudSession(user).whenComplete(() {
+        if (mounted) {
+          setState(() {
+            _resuming = false;
+            _loggedIn = true;
+          });
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     // if (!loggedIn) return <LoginScreen onLogin={() => setLoggedIn(true)} />
+    if (_resuming) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     if (!_loggedIn) {
       return LoginScreen(
         onLogin: () {

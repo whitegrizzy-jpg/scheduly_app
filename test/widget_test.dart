@@ -9,7 +9,7 @@ Future<void> enterHome(WidgetTester tester) async {
   tester.view.physicalSize = const Size(1080, 2400);
   tester.view.devicePixelRatio = 2.6;
   addTearDown(tester.view.reset);
-  AppServices.todos = InMemoryTodoRepository();
+  AppServices.localRepoFactory = () => InMemoryTodoRepository();
   await tester.pumpWidget(const MyApp());
   await tester.tap(find.byKey(const Key('demo_start')));
   await tester.pumpAndSettle();

@@ -1,0 +1,9 @@
+rules_version = '2';
+// Scheduly 보안 규칙: 로그인한 사용자는 자기 uid 아래의 할 일만 읽고 쓸 수 있다.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/todos/{todoId} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

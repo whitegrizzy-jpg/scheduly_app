@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/sync_service.dart';
 import '../data/todo_repository.dart';
 import '../main.dart';
 import '../models/todo.dart';
@@ -71,6 +72,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadTodos();
+    _sync = AppServices.sync;
+    _seenVersion = _sync?.dataVersion ?? 0;
+    _sync?.addListener(_onSyncChanged);
 
     _memos = [
       Memo(
@@ -90,8 +94,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _sync?.removeListener(_onSyncChanged);
     _todoController.dispose();
     super.dispose();
+  }
+
+  SyncService? _sync;
+  int _seenVersion = 0;
+
+  /// 동기화 상태가 바뀌면 배지를 다시 그리고, 서버에서 받은 변경이 있으면 목록을 다시 읽는다.
+  void _onSyncChanged() {
+    final v = _sync?.dataVersion ?? 0;
+    if (v != _seenVersion) {
+      _seenVersion = v;
+      _loadTodos();
+    } else if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// 당겨서 새로고침: 서버와 동기화한 뒤 목록을 다시 읽는다.
+  Future<void> _refresh() async {
+    await _sync?.syncNow();
+    await _loadTodos();
   }
 
   /// 로컬 DB에서 할 일 목록을 읽어 온다 (앱 재시작 후에도 유지).
@@ -218,361 +243,372 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: _Theme.background,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. Header (안녕하세요, 데모 사용자님)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        '안녕하세요 👋',
-                        style: TextStyle(color: _Theme.muted, fontSize: 14),
-                      ),
-                      const SizedBox(height: 2),
-                      const Text(
-                        '${MockUser.name}님',
-                        style: TextStyle(
-                          color: _Theme.text,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      RichText(
-                        text: TextSpan(
-                          style: const TextStyle(
-                            color: _Theme.muted,
-                            fontSize: 14,
-                          ),
-                          children: [
-                            const TextSpan(text: '오늘 '),
-                            TextSpan(
-                              text: '${pending.length}개',
-                              style: const TextStyle(
-                                color: _Theme.primaryLight,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const TextSpan(text: '의 할 일이 남아있어요'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  GestureDetector(
-                    onTap: () {
-                      // 프로필 화면으로 이동 (추후 구현할 ProfileScreen 클래스로 연결)
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => const ProfileScreen(),
-                        ),
-                      );
-                    },
-                    child: Container(
-                      width: 40,
-                      height: 40,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: LinearGradient(
-                          colors: [_Theme.primary, Color(0xffa78bfa)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                      ),
-                      alignment: Alignment.center,
-                      child: const Text(
-                        MockUser.initial,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-
-              // 2. Stats Grid (남은 할 일, 오늘 마감, 완료)
-              Row(
-                children: [
-                  _buildStatCard(
-                    '📋',
-                    '${pending.length}',
-                    '남은 할 일',
-                    _Theme.primary,
-                  ),
-                  const SizedBox(width: 12),
-                  _buildStatCard(
-                    '🔥',
-                    '$todayDueCount',
-                    '오늘 마감',
-                    _Theme.accent,
-                  ),
-                  const SizedBox(width: 12),
-                  _buildStatCard('✅', '${done.length}', '완료', _Theme.green),
-                ],
-              ),
-              const SizedBox(height: 24),
-
-              // 3. Todos Title & Toggle Button
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    '📋 할 일',
-                    style: TextStyle(
-                      color: _Theme.text,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  GestureDetector(
-                    key: const Key('todo_add_toggle'),
-                    onTap: () => _showInput
-                        ? setState(() {
-                            _showInput = false;
-                            _inputError = '';
-                          })
-                        : _openInput(),
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _Theme.primary,
-                      ),
-                      alignment: Alignment.center,
-                      child: Text(
-                        _showInput ? '×' : '+',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-
-              // Todo Input Field
-              if (_showInput) ...[
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16.0,
+              vertical: 24.0,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 1. Header (안녕하세요, 데모 사용자님)
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: _Theme.surface,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: _inputError.isNotEmpty
-                                ? _Theme.accent
-                                : _Theme.border,
-                          ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '안녕하세요 👋',
+                          style: TextStyle(color: _Theme.muted, fontSize: 14),
                         ),
-                        child: TextField(
-                          key: const Key('todo_input'),
-                          controller: _todoController,
-                          autofocus: true,
-                          onChanged: (_) {
-                            if (_inputError.isNotEmpty) {
-                              setState(() => _inputError = '');
-                            }
-                          },
-                          style: const TextStyle(
+                        const SizedBox(height: 2),
+                        const Text(
+                          '${MockUser.name}님',
+                          style: TextStyle(
                             color: _Theme.text,
-                            fontSize: 14,
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
                           ),
-                          decoration: const InputDecoration(
-                            hintText: '새 할 일 입력...',
-                            hintStyle: TextStyle(color: _Theme.muted),
-                            contentPadding: EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
+                        ),
+                        const SizedBox(height: 4),
+                        RichText(
+                          text: TextSpan(
+                            style: const TextStyle(
+                              color: _Theme.muted,
+                              fontSize: 14,
                             ),
-                            border: InputBorder.none,
+                            children: [
+                              const TextSpan(text: '오늘 '),
+                              TextSpan(
+                                text: '${pending.length}개',
+                                style: const TextStyle(
+                                  color: _Theme.primaryLight,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const TextSpan(text: '의 할 일이 남아있어요'),
+                            ],
                           ),
-                          onSubmitted: (_) => _addTodo(),
                         ),
-                      ),
+                        if (_sync != null) ...[
+                          const SizedBox(height: 8),
+                          _SyncBadge(sync: _sync!),
+                        ],
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    ElevatedButton(
-                      key: const Key('todo_add_button'),
-                      onPressed: _addTodo,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _Theme.primary,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
+                    GestureDetector(
+                      onTap: () {
+                        // 프로필 화면으로 이동 (추후 구현할 ProfileScreen 클래스로 연결)
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => const ProfileScreen(),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        width: 40,
+                        height: 40,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [_Theme.primary, Color(0xffa78bfa)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text(
-                        '추가',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
+                        alignment: Alignment.center,
+                        child: const Text(
+                          MockUser.initial,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                     ),
                   ],
                 ),
-                if (_inputError.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6, left: 4),
-                    child: Text(
-                      '⚠️ $_inputError',
-                      style: const TextStyle(
-                        color: _Theme.accent,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-              ],
+                const SizedBox(height: 24),
 
-              if (_loading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 32),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              // 할 일이 하나도 없을 때: 빈 상태 안내 화면
-              else if (_todos.isEmpty)
-                _EmptyTodoState(onAdd: _openInput)
-              else ...[
-                _FilterBar(
-                  filter: _filter,
-                  counts: {
-                    TodoFilter.all: _todos.length,
-                    TodoFilter.pending: pending.length,
-                    TodoFilter.done: done.length,
-                  },
-                  onChanged: (f) => setState(() => _filter = f),
+                // 2. Stats Grid (남은 할 일, 오늘 마감, 완료)
+                Row(
+                  children: [
+                    _buildStatCard(
+                      '📋',
+                      '${pending.length}',
+                      '남은 할 일',
+                      _Theme.primary,
+                    ),
+                    const SizedBox(width: 12),
+                    _buildStatCard(
+                      '🔥',
+                      '$todayDueCount',
+                      '오늘 마감',
+                      _Theme.accent,
+                    ),
+                    const SizedBox(width: 12),
+                    _buildStatCard('✅', '${done.length}', '완료', _Theme.green),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                _buildTodoList(pending, done),
-              ],
-              const SizedBox(height: 24),
-              // 4. Memos Section
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    '📝 메모',
-                    style: TextStyle(
-                      color: _Theme.text,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: _addBlankMemo,
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: _Theme.surface2,
-                      ),
-                      alignment: Alignment.center,
-                      child: const Text(
-                        '+',
-                        style: TextStyle(
-                          color: _Theme.muted,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
+                const SizedBox(height: 24),
 
-              // Memo List Items (좌측 컬러 보더 & 스택 내 닫기 버튼 구조)
-              Column(
-                children: _memos
-                    .map(
-                      (m) => Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.only(bottom: 8),
-                        decoration: BoxDecoration(
-                          color: _Theme.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border(
-                            left: BorderSide(color: m.color, width: 3),
+                // 3. Todos Title & Toggle Button
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      '📋 할 일',
+                      style: TextStyle(
+                        color: _Theme.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    GestureDetector(
+                      key: const Key('todo_add_toggle'),
+                      onTap: () => _showInput
+                          ? setState(() {
+                              _showInput = false;
+                              _inputError = '';
+                            })
+                          : _openInput(),
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _Theme.primary,
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(
+                          _showInput ? '×' : '+',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        child: Stack(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                16,
-                                16,
-                                40,
-                                16,
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    m.text,
-                                    style: const TextStyle(
-                                      color: _Theme.text,
-                                      fontSize: 14,
-                                      height: 1.5,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    m.date,
-                                    style: const TextStyle(
-                                      color: _Theme.muted,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Todo Input Field
+                if (_showInput) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: _Theme.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: _inputError.isNotEmpty
+                                  ? _Theme.accent
+                                  : _Theme.border,
                             ),
-                            Positioned(
-                              top: 8,
-                              right: 8,
-                              child: IconButton(
-                                icon: const Icon(
-                                  Icons.close,
-                                  size: 16,
-                                  color: _Theme.muted,
-                                ),
-                                onPressed: () => _deleteMemo(m.id),
-                                splashRadius: 16,
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                              ),
+                          ),
+                          child: TextField(
+                            key: const Key('todo_input'),
+                            controller: _todoController,
+                            autofocus: true,
+                            onChanged: (_) {
+                              if (_inputError.isNotEmpty) {
+                                setState(() => _inputError = '');
+                              }
+                            },
+                            style: const TextStyle(
+                              color: _Theme.text,
+                              fontSize: 14,
                             ),
-                          ],
+                            decoration: const InputDecoration(
+                              hintText: '새 할 일 입력...',
+                              hintStyle: TextStyle(color: _Theme.muted),
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                              border: InputBorder.none,
+                            ),
+                            onSubmitted: (_) => _addTodo(),
+                          ),
                         ),
                       ),
-                    )
-                    .toList(),
-              ),
-            ],
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        key: const Key('todo_add_button'),
+                        onPressed: _addTodo,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _Theme.primary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          '추가',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_inputError.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6, left: 4),
+                      child: Text(
+                        '⚠️ $_inputError',
+                        style: const TextStyle(
+                          color: _Theme.accent,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                ],
+
+                if (_loading)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                // 할 일이 하나도 없을 때: 빈 상태 안내 화면
+                else if (_todos.isEmpty)
+                  _EmptyTodoState(onAdd: _openInput)
+                else ...[
+                  _FilterBar(
+                    filter: _filter,
+                    counts: {
+                      TodoFilter.all: _todos.length,
+                      TodoFilter.pending: pending.length,
+                      TodoFilter.done: done.length,
+                    },
+                    onChanged: (f) => setState(() => _filter = f),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildTodoList(pending, done),
+                ],
+                const SizedBox(height: 24),
+                // 4. Memos Section
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      '📝 메모',
+                      style: TextStyle(
+                        color: _Theme.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: _addBlankMemo,
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _Theme.surface2,
+                        ),
+                        alignment: Alignment.center,
+                        child: const Text(
+                          '+',
+                          style: TextStyle(
+                            color: _Theme.muted,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                // Memo List Items (좌측 컬러 보더 & 스택 내 닫기 버튼 구조)
+                Column(
+                  children: _memos
+                      .map(
+                        (m) => Container(
+                          width: double.infinity,
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: _Theme.surface,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border(
+                              left: BorderSide(color: m.color, width: 3),
+                            ),
+                          ),
+                          child: Stack(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  16,
+                                  40,
+                                  16,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      m.text,
+                                      style: const TextStyle(
+                                        color: _Theme.text,
+                                        fontSize: 14,
+                                        height: 1.5,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      m.date,
+                                      style: const TextStyle(
+                                        color: _Theme.muted,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Positioned(
+                                top: 8,
+                                right: 8,
+                                child: IconButton(
+                                  icon: const Icon(
+                                    Icons.close,
+                                    size: 16,
+                                    color: _Theme.muted,
+                                  ),
+                                  onPressed: () => _deleteMemo(m.id),
+                                  splashRadius: 16,
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -672,6 +708,55 @@ class _HomeScreenState extends State<HomeScreen> {
               style: const TextStyle(color: _Theme.muted, fontSize: 12),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// 동기화 상태 배지: 탭하면 바로 동기화
+class _SyncBadge extends StatelessWidget {
+  final SyncService sync;
+
+  const _SyncBadge({required this.sync});
+
+  @override
+  Widget build(BuildContext context) {
+    final n = sync.pendingCount;
+    late final String label;
+    late final Color color;
+    switch (sync.status) {
+      case SyncStatus.offline:
+        label = n > 0 ? '📴 오프라인 · 대기 $n건' : '📴 오프라인';
+        color = _Theme.muted;
+      case SyncStatus.syncing:
+        label = '🔄 동기화 중…';
+        color = _Theme.primary;
+      case SyncStatus.error:
+        label = '⚠️ 동기화 실패 · 대기 $n건 (탭하여 재시도)';
+        color = _Theme.accent;
+      case SyncStatus.synced:
+        label = n > 0 ? '⏳ 대기 $n건' : '☁️ 서버와 동기화됨';
+        color = n > 0 ? const Color(0xfff59e0b) : const Color(0xff16a34a);
+    }
+    return InkWell(
+      key: const Key('sync_badge'),
+      onTap: sync.syncNow,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withValues(alpha: 0.4)),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
     );
@@ -1109,8 +1194,8 @@ class ProfileScreen extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const Text(
-                '데모 계정',
+              Text(
+                AppServices.currentUser?.email ?? '데모 계정 (이 기기에만 저장)',
                 style: TextStyle(color: _Theme.muted, fontSize: 14),
               ),
               const SizedBox(height: 40),
@@ -1207,6 +1292,7 @@ class ProfileScreen extends StatelessWidget {
             TextButton(
               onPressed: () {
                 Navigator.pop(context); // 1. 우선 로그아웃 팝업창을 닫습니다.
+                AppServices.endSession(); // 동기화 중지 + Firebase 로그아웃
 
                 // 2. 이전 화면 기록을 지우고 앱 루트(로그인 상태 초기화)로 돌아갑니다.
                 //    AppRoot가 로그인 화면을 보여 주고, 다시 로그인하면 홈으로 진입합니다.

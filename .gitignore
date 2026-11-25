@@ -49,3 +49,11 @@ app.*.map.json
 
 # 제출 ZIP
 /dist/
+
+# Firebase 설정 (실제 값) — .env.example 만 커밋
+.env
+.env.*
+!.env.example
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
+lib/firebase_options.dart
