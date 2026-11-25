@@ -164,6 +164,8 @@ class _LoginScreenState extends State<LoginScreen> {
                             key: const Key('login_id'),
                             controller: _idController,
                             keyboardType: _cloud ? TextInputType.emailAddress : TextInputType.text,
+                            autocorrect: false,
+                            enableSuggestions: false,
                             onChanged: (_) {
                               if (_error.isNotEmpty) setState(() => _error = '');
                             },
@@ -493,6 +495,8 @@ class _SignupModalState extends State<SignupModal> {
                                     key: ValueKey('signup_${f['key']}'),
                                     controller: _controllers[f['key']],
                                     keyboardType: f['key'] == 'email' ? TextInputType.emailAddress : TextInputType.text,
+                                    autocorrect: false,
+                                    enableSuggestions: false,
                                     obscureText: isPw,
                                     style: const TextStyle(fontSize: 14, color: AppColors.text),
                                     decoration: InputDecoration(

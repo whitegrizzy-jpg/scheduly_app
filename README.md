@@ -1,128 +1,160 @@
-# Scheduly — 할 일 앱 (주제 #2109 MP2: 저장되는 앱으로 만들기)
+# Scheduly — 할 일 앱 (주제 #2109 MP3: 백엔드 서비스로 동기화하기)
 
-Flutter로 만든 할 일 관리 앱입니다. MP1의 화면(목록·추가·완료 토글·빈 상태)에 이어 MP2에서는
-**로컬 저장(SQLite)** 을 붙이고 **수정·삭제·필터** 를 더해 CRUD를 완성했습니다. 앱을 껐다 켜도 할 일이 그대로 남습니다.
+Flutter 할 일 앱입니다. MP2의 로컬 저장(SQLite) CRUD에 이어 MP3에서는 **Firebase(Authentication + Cloud Firestore)** 와 연동해
+**같은 계정으로 로그인한 여러 기기에서 같은 목록**을 보고, **오프라인에서 쓴 항목이 온라인으로 돌아오면 서버에 반영**되도록 했습니다.
 
 ## 실행 절차
 
 - 프레임워크/SDK: **Flutter 3.47.5 (stable) / Dart 3.13.4**
-- 실행 기기: Android 에뮬레이터 **Pixel_8 (Android 17 / API 37, 1080×2400)**
-- 로컬 저장소 라이브러리: `sqflite 2.4.x` (+ `path`), 테스트용 `sqflite_common_ffi`
+- 실행 기기: Android 에뮬레이터 **Pixel_8 (기기 A)**, **Pixel_8_B (기기 B)** — 둘 다 Android 17 / API 37, 1080×2400
+- 백엔드: **Firebase** 무료 요금제(Spark) — Authentication(이메일/비밀번호), Cloud Firestore(서울 `asia-northeast3`)
+- 주요 패키지: `firebase_core 5.x`, `firebase_auth 7.x`, `cloud_firestore 7.x`, `connectivity_plus 7.x`, `sqflite 2.4.x`
 - 잠금 파일: `pubspec.lock`, `android/gradle/wrapper/gradle-wrapper.properties`
 
 제출 ZIP에서는 Flutter 프로젝트가 `app/` 폴더에 있으므로 먼저 `cd app` 한 뒤 실행합니다.
 
 ```bash
-flutter --version          # Flutter 3.47.5 / Dart 3.13.4 확인
+flutter --version                      # Flutter 3.47.5 / Dart 3.13.4 확인
 flutter pub get
+cp .env.example .env                   # 아래 "백엔드 설정 절차"대로 값을 채운다
 flutter emulators --launch Pixel_8
-flutter run
+flutter run --dart-define-from-file=.env
 ```
 
-테스트 실행 (위젯 테스트 8개 + SQLite 저장소 테스트 3개):
+두 번째 기기(동기화 확인용):
+
+```bash
+flutter emulators --launch Pixel_8_B
+flutter run -d emulator-5556 --dart-define-from-file=.env
+```
+
+테스트 실행 (위젯 8개 + SQLite 3개 + 동기화 시나리오 7개 = 18개, 서버 없이 실행됨):
 
 ```bash
 flutter test
 ```
 
-앱이 켜지면 로그인 화면에서 **「로그인 없이 둘러보기」** 를 누르거나, 아무 아이디·비밀번호를 입력하고 **로그인** 을 누르면 홈(할 일 목록)으로 들어갑니다.
-(MP1·MP2는 데모 모드입니다. 계정 정보는 소스에 두지 않으며, 실제 인증은 MP3에서 BaaS로 연결합니다.)
+- `.env` 없이 `flutter run`만 하면 서버 동기화 없이 **로컬 전용 모드**(MP2와 동일)로 동작합니다.
+- 클라우드 모드에서는 로그인 화면의 **회원가입**으로 테스트 계정(예: `test1@example.com` 같은 더미 주소)을 만든 뒤, 두 기기에서 **같은 계정으로 로그인**합니다.
 
-처음 설치하면 시험 데이터 4개가 DB에 한 번 들어갑니다. 처음 상태로 되돌리려면 앱 데이터를 지우거나 다시 설치합니다.
+## 백엔드 설정 절차 (Firebase)
 
-```bash
-adb shell pm clear com.example.scheduly_app
+1. [Firebase 콘솔](https://console.firebase.google.com)에서 프로젝트를 만든다 (애널리틱스는 꺼도 됨).
+2. **Authentication → 로그인 방법 → 이메일/비밀번호** 사용 설정
+3. **Firestore Database → 데이터베이스 만들기** (위치 `asia-northeast3`, 프로덕션 모드) → **규칙** 탭에 [`firebase/firestore.rules`](firebase/firestore.rules) 내용을 붙여넣고 게시
+4. **프로젝트 설정 → 내 앱 → Android 앱 추가**, 패키지 이름 `com.example.scheduly_app`
+5. 같은 화면의 값으로 `.env`를 채운다. API 키는 내려받은 `google-services.json`의 `current_key` 값이다.
+
+| `.env` 키 | 값을 찾는 곳 |
+|---|---|
+| `FIREBASE_API_KEY` | `google-services.json` → `client[0].api_key[0].current_key` |
+| `FIREBASE_APP_ID` | 프로젝트 설정 → 내 앱 → 앱 ID (`1:…:android:…`) |
+| `FIREBASE_MESSAGING_SENDER_ID` | 프로젝트 번호 (앱 ID 가운데 숫자) |
+| `FIREBASE_PROJECT_ID` | 프로젝트 ID |
+| `FIREBASE_STORAGE_BUCKET` | (선택) 비워도 됨 |
+
+### 설정 키 분리
+
+- 키는 소스에 없습니다. `--dart-define-from-file=.env`로 **빌드할 때만** 주입되고, `lib/config/env.dart`에서 읽습니다.
+- `.env`, `.env.*`, `google-services.json`, `firebase_options.dart`는 `.gitignore`에 있습니다. 저장소와 제출물에는 **`.env.example`(빈 값)만** 들어 있습니다.
+- 데이터 보호는 키를 숨기는 것이 아니라 **보안 규칙**으로 합니다: 로그인한 사용자는 자기 `uid` 아래(`users/{uid}/todos`)만 읽고 쓸 수 있습니다.
+
+## 선택한 BaaS: Firebase, 그리고 이유
+
+| 항목 | **Firebase (선택)** | Supabase |
+|---|---|---|
+| 데이터베이스 | Cloud Firestore (문서형 NoSQL) | PostgreSQL (관계형) |
+| Flutter 지원 | 공식 FlutterFire 플러그인 (`firebase_auth`, `cloud_firestore`) | 공식 `supabase_flutter` |
+| 실시간 변경 | 문서 스냅샷 리스너 기본 제공 | Realtime(Postgres 변경 구독) |
+| 서버 쪽 비교 후 쓰기 | 트랜잭션(`runTransaction`)으로 바로 가능 | RPC(SQL 함수) 또는 정책 작성 필요 |
+| 접근 제어 | 보안 규칙 (경로 + `request.auth.uid`) | Row Level Security 정책 |
+| 무료 요금제 | Spark: 읽기 5만·쓰기 2만/일 | 프로젝트 2개, 7일 비활성 시 일시 중지 |
+
+1. 팀이 9주차 기술 보고서에서 이미 Firebase를 골랐고, Authentication과 데이터베이스를 한 콘솔에서 바로 설정할 수 있습니다.
+2. 동기화 충돌 처리에 필요한 **"서버 값과 비교한 뒤 더 최신일 때만 쓰기"** 를 Firestore 트랜잭션으로 SQL 함수 없이 클라이언트 코드에서 구현할 수 있습니다.
+3. 할 일 데이터는 사용자별 독립 목록이라 관계형 JOIN이 필요 없고, `users/{uid}/todos/{id}` 문서 구조와 경로 기반 보안 규칙이 잘 맞습니다.
+4. 무료 요금제에 일시 중지 정책이 없어, 과제 검수 기간에 서버가 멈출 걱정이 없습니다.
+
+## 동기화 구조와 충돌 처리 방침
+
+```
+화면 ──▶ SyncingTodoRepository ──▶ SQLite (로컬, 항상 먼저 저장)
+                                      │  sync_status = pending (대기열)
+                                      ▼
+                                 SyncService ──push──▶ Firestore users/{uid}/todos/{id}
+                                      ▲      ◀─pull── (실시간 리스너 + 새로고침)
+                         connectivity_plus (온라인/오프라인 감지)
 ```
 
-## 저장 방식: sqflite(SQLite)를 고른 이유
+### 오프라인 → 온라인 흐름
 
-### 대안 비교
+1. 추가·수정·완료·삭제는 **항상 로컬 SQLite에 먼저 저장**하고 `sync_status = pending`, `updated_at = 지금`으로 표시합니다. 그래서 오프라인에서도 화면에 바로 반영됩니다.
+2. 온라인이면 대기 항목을 **오래된 순서대로** 서버에 올리고, 성공하면 `synced`로 바꿉니다.
+3. 오프라인이면 홈 화면 배지에 `📴 오프라인 · 대기 n건`이 보이고, 대기열은 기기에 남아 있습니다(앱을 꺼도 유지).
+4. **네트워크가 다시 연결되면**(`connectivity_plus` 이벤트) 자동으로 대기열을 올리고, 실패하면 20초마다 다시 시도합니다. 배지를 누르거나 목록을 당겨도 즉시 동기화합니다.
+5. 서버 쪽 변경은 Firestore 실시간 리스너와 새로고침(당겨서 새로고침)으로 받아 로컬에 반영합니다.
+6. Firestore 자체 오프라인 캐시는 끄고(`persistenceEnabled: false`) 대기열을 앱이 직접 관리합니다. 대기 건수를 화면에 보여 주고, 충돌 규칙을 한곳(`SyncService`)에서 통제하기 위해서입니다.
 
-| 항목 | **sqflite (SQLite)** ✅ | shared_preferences | Hive / Isar (NoSQL) | Drift (SQLite ORM) |
-|---|---|---|---|---|
-| 저장 형태 | 테이블(행·열), SQL | 키-값 (문자열·숫자·bool·문자열 목록) | 객체·박스 단위 | 테이블 + 타입 안전 쿼리 |
-| 할 일 목록 저장 | 행 단위 INSERT / UPDATE / DELETE | 목록 전체를 JSON 문자열로 만들어 통째로 덮어써야 함 | 객체 단위 저장 가능 | 행 단위, 코드 생성 필요 |
-| 정렬·필터 | `ORDER BY`, `WHERE`로 바로 가능 | 앱에서 전부 읽은 뒤 직접 처리 | 쿼리 기능 있음(라이브러리마다 다름) | SQL과 같음 |
-| 스키마 변경 | `version` + `onUpgrade` 마이그레이션 | 없음 (형식이 바뀌면 직접 변환) | 어댑터·스키마 관리 필요 | 마이그레이션 도구 제공 |
-| 설정 난이도 | 낮음 (코드 생성 없음) | 가장 낮음 | 중간 (어댑터·코드 생성) | 높음 (build_runner) |
-| 유지 상태 | Flutter 진영 표준, 꾸준히 관리됨 | 공식 플러그인 | Hive v2는 관리가 사실상 멈췄고, Isar도 유지보수가 불안정 | 활발 |
-| MP3(BaaS 동기화)와의 연결 | 행마다 `id`·`created_at`이 있어 동기화 대기열·충돌 비교 칼럼을 추가하기 쉬움 | 부분 동기화가 어려움 | 가능 | 가능 |
+### 충돌 처리 방침: 마지막 수정 우선 (Last-Write-Wins, 항목 단위)
 
-### 선택 이유
+- 모든 항목에 `updated_at`(마지막 수정 시각, 밀리초)을 둡니다.
+- **서버에 올릴 때**: Firestore 트랜잭션으로 서버 문서를 읽어 `서버.updated_at ≥ 내 updated_at`이면 쓰지 않고 서버 값을 받아 로컬을 덮어씁니다. 내 값이 더 최신일 때만 기록합니다. 두 기기가 동시에 올려도 더 최신 값만 남습니다.
+- **서버에서 받을 때**: `서버.updated_at > 로컬.updated_at`일 때만 로컬에 반영합니다. 로컬이 더 최신(아직 못 올린 변경)이면 무시하고, 이후 로컬 값이 서버로 올라갑니다.
+- **삭제**: 행을 바로 지우지 않고 `deleted = true`인 **삭제 표시(tombstone)** 로 저장해 같은 규칙으로 전파합니다. 그래서 "한 기기에서 삭제, 다른 기기에서 옛 값 재업로드"로 삭제한 항목이 되살아나지 않습니다.
+- **판단 이유**: 할 일 한 건은 제목·기한·완료 여부가 짧고 한 사람이 쓰는 데이터라, 필드 단위 병합보다 "가장 나중에 고친 내용"을 남기는 편이 사용자가 예상하기 쉽고 구현·검증이 단순합니다.
+- **한계와 보완**: 기기 시계가 크게 틀리면 순서가 뒤바뀔 수 있습니다(같은 계정의 개인 기기 기준이라 허용). 같은 항목을 두 기기에서 오프라인으로 동시에 고치면 먼저 고친 쪽 내용은 사라집니다. 이 동작은 `test/sync_service_test.dart`의 충돌 테스트 2개로 확인했습니다.
 
-1. **할 일은 "같은 모양의 레코드 여러 개"** 입니다. 추가·수정·삭제가 한 행씩 일어나므로, 목록 전체를 매번 다시 쓰는 shared_preferences보다 행 단위 SQL이 자연스럽고 데이터가 깨질 위험도 적습니다.
-2. **정렬(최신순)과 필터(완료 여부)** 를 SQL로 표현할 수 있고, 항목이 늘어도 성능이 안정적입니다.
-3. **MP3 대비**: 다음 단계에서 `updated_at`, `sync_status` 같은 칼럼을 추가해 오프라인 대기열을 만들 계획입니다. `onUpgrade` 마이그레이션으로 기존 사용자의 데이터를 지키며 스키마를 바꿀 수 있습니다.
-4. Drift도 좋지만 코드 생성(build_runner)이 필요해 팀원 모두의 빌드 과정이 복잡해지고, Hive/Isar는 유지보수 상태가 불안정해 제외했습니다.
-5. shared_preferences는 "마지막으로 고른 필터" 같은 **작은 설정값** 저장에는 알맞아, 이후 설정 저장용으로 함께 쓸 수 있습니다.
+### 로컬 DB 변경 (MP2 → MP3)
 
-### 구조
-
-```
-HomeScreen ──▶ TodoRepository (인터페이스)
-                 ├─ SqfliteTodoRepository   ← 앱 실행 시 (scheduly.db / todos 테이블)
-                 └─ InMemoryTodoRepository  ← 위젯 테스트
-```
-
-- 화면은 `TodoRepository`만 알기 때문에, MP3에서 BaaS 저장소를 추가해도 화면 코드는 거의 바꾸지 않아도 됩니다. (`lib/data/todo_repository.dart`)
-- 화면 상태를 먼저 바꿔 즉시 반영하고, 같은 내용을 DB에 기록합니다.
-- 테이블: `todos(id INTEGER PK, text TEXT, done INTEGER(0/1), due TEXT, priority TEXT, created_at INTEGER)`
+`todos` 테이블에 `updated_at`, `deleted`, `sync_status` 칼럼을 추가하고 DB 버전을 2로 올렸습니다. MP2를 쓰던 기기는 `onUpgrade`로 데이터를 그대로 둔 채 칼럼만 추가되고, 기존 항목은 첫 로그인 때 서버로 올라갑니다. 로그인한 사용자마다 로컬 DB 파일을 따로 둡니다(`scheduly_{uid}.db`).
 
 ## 구현 기능 목록
 
 | 기능 | 설명 | 위치 |
 |---|---|---|
-| **조회(Read)** | 앱이 시작되면 DB에서 최신순으로 읽어 미완료 → 완료됨 순으로 표시 | `_loadTodos()` |
-| **추가(Create)** | `+` → 입력 → **추가**. 공백은 "할 일을 입력해주세요" 안내 후 무시 | `_addTodo()` |
-| **수정(Update)** | 카드의 ✏️ 버튼(또는 길게 누르기) → 수정 시트에서 제목·기한·우선순위를 바꿔 **저장** (빈 제목은 저장 불가) | `_editTodo()`, `_EditTodoSheet` |
-| 완료 토글 | 카드를 탭하면 완료/미완료가 바뀌고 DB에도 저장 | `_toggleTodo()` |
-| **삭제(Delete)** | 카드를 왼쪽으로 밀면 삭제, 스낵바 **되돌리기**로 복구 (DB에서도 삭제/복구) | `_deleteTodo()` |
-| **필터** | 전체 / 미완료 / 완료 칩. 각 칩에 개수 표시 | `_FilterBar`, `_buildTodoList()` |
-| 재시작 후 유지 | 위 모든 변경이 SQLite에 저장되어 앱을 강제 종료 후 다시 켜도 유지 | `SqfliteTodoRepository` |
-| 빈 상태 안내 | 할 일이 0개면 안내와 **할 일 추가하기** 버튼 표시 (전부 지운 상태도 재시작 후 유지) | `_EmptyTodoState` |
-
-캘린더·단체·손글씨 탭과 홈 화면의 메모는 아직 화면 시안이며 저장하지 않습니다. (손글씨는 MP4에서 OCR로 교체 예정)
+| 회원가입·로그인·로그아웃 | Firebase Authentication 이메일/비밀번호, 오류 문구 한국어 처리, 다시 실행하면 로그인 유지 | `lib/services/auth_service.dart`, `login_screen.dart` |
+| 기기 간 동기화 | 같은 계정의 할 일이 Firestore를 통해 모든 기기에 반영 (실시간 + 당겨서 새로고침) | `lib/data/sync_service.dart` |
+| 오프라인 작성 → 온라인 반영 | SQLite 대기열 + 연결 감지 후 자동 업로드 + 20초 재시도 | `SyncService`, `SqfliteTodoRepository` |
+| 충돌 처리 | 항목 단위 LWW, Firestore 트랜잭션, 삭제 표시 | `FirestoreTodoStore.pushIfNewer`, `applyRemote` |
+| 동기화 상태 배지 | ☁️ 서버와 동기화됨 / ⏳ 대기 n건 / 📴 오프라인 · 대기 n건 / ⚠️ 실패. 누르면 즉시 동기화 | `_SyncBadge` |
+| 설정 키 분리 | `.env` → `--dart-define-from-file`, `.env.example`만 커밋 | `lib/config/env.dart` |
+| 보안 규칙 | 본인 `uid` 경로만 읽기·쓰기 허용 | `firebase/firestore.rules` |
+| (MP2 유지) CRUD·필터 | 추가·수정·완료·삭제(되돌리기), 전체/미완료/완료 필터 | `home_screen.dart` |
 
 ## 확인 방법
 
-### 할 일 목록 조회
+### 기기 A에서 추가 → 기기 B 새로고침 후 표시
 
-- 조작: 앱을 처음 설치해 실행하고 「로그인 없이 둘러보기」를 누른다
-- 기대 결과: DB에 들어간 시험 데이터 4개가 보이고, 필터 칩에 전체 4 / 미완료 3 / 완료 1이 표시된다
-- 스크린샷: 01_list.png
+- 조작: 두 에뮬레이터에서 같은 테스트 계정으로 로그인한다. 기기 A에서 `+`를 눌러 "Added on device A"를 추가한 뒤, 기기 B에서 목록을 아래로 당겨 새로고침한다
+- 기대 결과: 기기 A 배지가 「☁️ 서버와 동기화됨」으로 돌아오고, 기기 B 목록에 "Added on device A"가 나타난다 (전체 1)
+- 스크린샷: 01_deviceA_added.png, 02_deviceB_synced.png
 
-### 항목 수정
+### 오프라인 작성 → 온라인 복귀 후 서버 반영
 
-- 조작: 「알고리즘 과제 3번 풀기」 카드의 ✏️를 눌러 제목 끝에 " + ch.4"를 붙이고, 기한을 "Fri 18:00"으로 바꾸고, 우선순위를 「긴급」으로 고른 뒤 **저장**을 누른다
-- 기대 결과: 카드 제목·기한이 바뀌고 배지가 「긴급」(빨간색)으로 바뀐다
-- 스크린샷: 02_edit_sheet.png, 03_edited.png
+- 조작: 기기 A를 비행기 모드로 바꾸고(`adb -s emulator-5554 shell cmd connectivity airplane-mode enable`) "Written while offline"을 추가한다. 기기 B를 새로고침한다. 그다음 기기 A의 비행기 모드를 끄고(`… airplane-mode disable`) 기기 B를 다시 새로고침한다
+- 기대 결과: 오프라인인 기기 A에는 항목이 바로 보이고 배지가 「📴 오프라인 · 대기 1건」이다. 이때 기기 B에는 아직 없다. 비행기 모드를 끄면 기기 A 배지가 「☁️ 서버와 동기화됨」으로 바뀌고, 기기 B에도 "Written while offline"이 나타난다 (전체 2)
+- 스크린샷: 03_offline_pending.png, 04_deviceB_before.png, 05_online_synced.png, 06_deviceB_after.png
 
-### 필터 전환
+### 백엔드 콘솔
 
-- 조작: 「캡스톤 설계 보고서 제출」을 탭해 완료한 뒤, 「미완료」와 「완료」 칩을 차례로 누르고 「전체」로 돌아온다
-- 기대 결과: 미완료에는 완료 안 된 2개만, 완료에는 완료된 2개만 보이고, 칩 개수가 전체 4 / 미완료 2 / 완료 2로 바뀐다
-- 스크린샷: 04_filter_pending.png, 05_filter_done.png
+- 조작: Firebase 콘솔 → Firestore Database → 데이터에서 `users/{uid}/todos`를 연다
+- 기대 결과: 앱에서 추가한 두 항목이 문서(`text`, `done`, `updatedAt`, `deleted` 등)로 저장되어 있다
+- 스크린샷: 07_backend_console.png
 
-### 항목 삭제
+### 충돌 처리 (자동 테스트)
 
-- 조작: 「데이터베이스 중간고사 공부」 카드를 왼쪽으로 민다
-- 기대 결과: 카드가 사라지고 "'데이터베이스 중간고사 공부' 삭제됨" 스낵바와 **되돌리기**가 3초간 보인다. 칩이 전체 3 / 미완료 1 / 완료 2가 된다
-- 스크린샷: 06_delete_undo.png
+- 조작: `flutter test test/sync_service_test.dart`
+- 기대 결과: 기기 A→B 동기화, 오프라인 대기열, 충돌 2종(LWW), 삭제 전파, 서버 오류 후 재시도, MP2 DB 업그레이드 등 7개 시나리오가 모두 통과한다
+- 스크린샷: 없음 (터미널 결과)
 
-### 재시작 후 데이터 유지
+시험 데이터: 앱에서 직접 입력한 더미 할 일 "Added on device A", "Written while offline" / 테스트 계정은 회원가입 화면에서 만든 더미 이메일(실제 개인 메일 아님)
 
-- 조작: 위 상태에서 앱을 강제 종료한 뒤(최근 앱에서 밀어 닫기 또는 `adb shell am force-stop com.example.scheduly_app`) 다시 실행하고 「로그인 없이 둘러보기」를 누른다
-- 기대 결과: 종료 전과 같이 수정된 제목·기한·우선순위, 완료 상태, 삭제 결과가 그대로 보인다 (전체 3 / 미완료 1 / 완료 2)
-- 스크린샷: 07_before_restart.png, 08_relaunch_login.png, 09_after_restart.png
-
-시험 데이터: lib/data/sample_todos.dart (처음 설치할 때 DB에 한 번 들어가는 더미 할 일 4개, 실제 개인정보 없음)
-
-네트워크: 불필요 (모든 데이터는 기기 안의 SQLite에 저장, 오프라인/비행기 모드에서도 동작)
+네트워크: 필요 (온라인 상태에서 동기화 확인). 오프라인 확인은 에뮬레이터 비행기 모드로 진행
 
 ## 개인정보
 
-- 앱 화면과 소스의 이름·계정은 모두 더미 값입니다(「데모 사용자」, 「팀원A~L」).
-- 계정 정보와 API 키는 소스에 없습니다.
+- 앱 화면과 소스의 이름·계정은 모두 더미 값입니다. 회원가입에서 실명을 받지 않도록 이름 칸을 없앴습니다.
+- API 키·테스트 계정 비밀번호는 소스·커밋·제출물에 없습니다(`.env`, `.env.test`는 `.gitignore`).
 
 ## AI 도구 사용
 

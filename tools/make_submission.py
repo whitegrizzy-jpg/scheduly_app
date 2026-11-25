@@ -50,6 +50,10 @@ def main() -> None:
                 continue
             if f in TOP_LEVEL or f.startswith("screenshots/"):
                 zf.write(src, f)
+            elif f == ".env.example":
+                # 설정 키 목록은 최상위와 app/ 양쪽에 둔다 (실행 시에는 app/ 기준)
+                zf.write(src, f)
+                zf.write(src, f"app/{f}")
             elif not f.startswith(EXCLUDE_PREFIX):
                 zf.write(src, f"app/{f}")
 
