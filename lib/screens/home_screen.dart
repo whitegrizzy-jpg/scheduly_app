@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../data/sample_todos.dart';
+import '../data/todo_repository.dart';
 import '../main.dart';
 import '../models/todo.dart';
 
@@ -32,6 +32,9 @@ class Memo {
   });
 }
 
+/// 목록 필터: 전체 / 미완료 / 완료
+enum TodoFilter { all, pending, done }
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -54,7 +57,10 @@ class _HomeScreenState extends State<HomeScreen> {
   };
 
   // 상태 데이터 정의
-  late List<Todo> _todos;
+  final TodoRepository _repo = AppServices.todos;
+  List<Todo> _todos = [];
+  bool _loading = true;
+  TodoFilter _filter = TodoFilter.all;
   late List<Memo> _memos;
 
   bool _showInput = false;
@@ -64,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _todos = buildSampleTodos();
+    _loadTodos();
 
     _memos = [
       Memo(
@@ -88,7 +94,17 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  // 로직 함수들 구현
+  /// 로컬 DB에서 할 일 목록을 읽어 온다 (앱 재시작 후에도 유지).
+  Future<void> _loadTodos() async {
+    final items = await _repo.loadAll();
+    if (!mounted) return;
+    setState(() {
+      _todos = items;
+      _loading = false;
+    });
+  }
+
+  // 로직 함수들: 화면 상태를 먼저 바꾸고(즉시 반영) 같은 내용을 DB에 저장한다.
   void _addTodo() {
     final text = _todoController.text.trim();
     if (text.isEmpty) {
@@ -97,36 +113,41 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final todo = Todo(
+      id: now,
+      text: text,
+      done: false,
+      due: '기한 없음',
+      priority: 'mid',
+      createdAt: now,
+    );
     setState(() {
       _inputError = '';
-      _todos.insert(
-        0,
-        Todo(
-          id: DateTime.now().millisecondsSinceEpoch,
-          text: text,
-          done: false,
-          due: '기한 없음',
-          priority: 'mid',
-        ),
-      );
+      _todos.insert(0, todo);
       _todoController.clear();
       _showInput = false;
     });
+    _repo.insert(todo);
+  }
+
+  void _replace(Todo updated) {
+    setState(() {
+      final i = _todos.indexWhere((t) => t.id == updated.id);
+      if (i >= 0) _todos[i] = updated;
+    });
+    _repo.update(updated);
   }
 
   void _toggleTodo(int id) {
-    setState(() {
-      for (var todo in _todos) {
-        if (todo.id == id) {
-          todo.done = !todo.done;
-        }
-      }
-    });
+    final todo = _todos.firstWhere((t) => t.id == id);
+    _replace(todo.copyWith(done: !todo.done));
   }
 
   void _deleteTodo(Todo todo) {
     final index = _todos.indexOf(todo);
     setState(() => _todos.remove(todo));
+    _repo.delete(todo.id);
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -136,10 +157,27 @@ class _HomeScreenState extends State<HomeScreen> {
           persist: false,
           action: SnackBarAction(
             label: '되돌리기',
-            onPressed: () => setState(() => _todos.insert(index, todo)),
+            onPressed: () {
+              setState(() => _todos.insert(index, todo));
+              _repo.insert(todo);
+            },
           ),
         ),
       );
+  }
+
+  /// 수정 시트: 제목·기한·우선순위를 바꿔 저장한다.
+  Future<void> _editTodo(Todo todo) async {
+    final updated = await showModalBottomSheet<Todo>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _Theme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _EditTodoSheet(todo: todo, priorityLabel: priorityLabel),
+    );
+    if (updated != null) _replace(updated);
   }
 
   void _openInput() {
@@ -409,57 +447,27 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SizedBox(height: 12),
               ],
 
+              if (_loading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: Center(child: CircularProgressIndicator()),
+                )
               // 할 일이 하나도 없을 때: 빈 상태 안내 화면
-              if (_todos.isEmpty)
+              else if (_todos.isEmpty)
                 _EmptyTodoState(onAdd: _openInput)
-              else
-                // Todo List Items (진행 중 / 완료됨 리스트)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (pending.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 8.0),
-                        child: Text(
-                          '🎉 남은 할 일이 없어요. 모두 완료했습니다!',
-                          style: TextStyle(color: _Theme.muted, fontSize: 13),
-                        ),
-                      ),
-                    ...pending.map(
-                      (t) => Padding(
-                        padding: const EdgeInsets.only(bottom: 8.0),
-                        child: _TodoCardWidget(
-                          todo: t,
-                          onToggle: _toggleTodo,
-                          onDelete: _deleteTodo,
-                          priorityColor: priorityColor,
-                          priorityLabel: priorityLabel,
-                        ),
-                      ),
-                    ),
-                    if (done.isNotEmpty) ...[
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
-                        child: Text(
-                          '완료됨',
-                          style: TextStyle(color: _Theme.muted, fontSize: 12),
-                        ),
-                      ),
-                      ...done.map(
-                        (t) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8.0),
-                          child: _TodoCardWidget(
-                            todo: t,
-                            onToggle: _toggleTodo,
-                            onDelete: _deleteTodo,
-                            priorityColor: priorityColor,
-                            priorityLabel: priorityLabel,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
+              else ...[
+                _FilterBar(
+                  filter: _filter,
+                  counts: {
+                    TodoFilter.all: _todos.length,
+                    TodoFilter.pending: pending.length,
+                    TodoFilter.done: done.length,
+                  },
+                  onChanged: (f) => setState(() => _filter = f),
                 ),
+                const SizedBox(height: 12),
+                _buildTodoList(pending, done),
+              ],
               const SizedBox(height: 24),
               // 4. Memos Section
               Row(
@@ -571,6 +579,67 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _card(Todo t) => Padding(
+    padding: const EdgeInsets.only(bottom: 8.0),
+    child: _TodoCardWidget(
+      todo: t,
+      onToggle: _toggleTodo,
+      onDelete: _deleteTodo,
+      onEdit: _editTodo,
+      priorityColor: priorityColor,
+      priorityLabel: priorityLabel,
+    ),
+  );
+
+  Widget _hint(String text) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 12.0),
+    child: Text(
+      text,
+      style: const TextStyle(color: _Theme.muted, fontSize: 13),
+    ),
+  );
+
+  /// 선택한 필터에 맞춰 목록을 그린다.
+  Widget _buildTodoList(List<Todo> pending, List<Todo> done) {
+    switch (_filter) {
+      case TodoFilter.pending:
+        return Column(
+          key: const Key('todo_list_pending'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: pending.isEmpty
+              ? [_hint('🎉 미완료 할 일이 없어요')]
+              : pending.map(_card).toList(),
+        );
+      case TodoFilter.done:
+        return Column(
+          key: const Key('todo_list_done'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: done.isEmpty
+              ? [_hint('아직 완료한 할 일이 없어요')]
+              : done.map(_card).toList(),
+        );
+      case TodoFilter.all:
+        return Column(
+          key: const Key('todo_list_all'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (pending.isEmpty) _hint('🎉 남은 할 일이 없어요. 모두 완료했습니다!'),
+            ...pending.map(_card),
+            if (done.isNotEmpty) ...[
+              const Padding(
+                padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
+                child: Text(
+                  '완료됨',
+                  style: TextStyle(color: _Theme.muted, fontSize: 12),
+                ),
+              ),
+              ...done.map(_card),
+            ],
+          ],
+        );
+    }
+  }
+
   // 대시보드 통계 카드 빌더 함수
   Widget _buildStatCard(
     String icon,
@@ -666,6 +735,7 @@ class _TodoCardWidget extends StatelessWidget {
   final Todo todo;
   final Function(int) onToggle;
   final Function(Todo) onDelete;
+  final Function(Todo) onEdit;
   final Map<String, Color> priorityColor;
   final Map<String, String> priorityLabel;
 
@@ -673,6 +743,7 @@ class _TodoCardWidget extends StatelessWidget {
     required this.todo,
     required this.onToggle,
     required this.onDelete,
+    required this.onEdit,
     required this.priorityColor,
     required this.priorityLabel,
   });
@@ -704,6 +775,7 @@ class _TodoCardWidget extends StatelessWidget {
       opacity: todo.done ? 0.5 : 1.0,
       child: InkWell(
         onTap: () => onToggle(todo.id),
+        onLongPress: () => onEdit(todo),
         borderRadius: BorderRadius.circular(16),
         child: Ink(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -775,9 +847,200 @@ class _TodoCardWidget extends StatelessWidget {
                   ),
                 ),
               ),
+              // 수정 버튼 (카드를 길게 눌러도 수정 시트가 열린다)
+              IconButton(
+                key: ValueKey('todo_edit_${todo.id}'),
+                tooltip: '수정',
+                icon: const Icon(Icons.edit_outlined, size: 18),
+                color: _Theme.muted,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.only(left: 4),
+                constraints: const BoxConstraints(),
+                onPressed: () => onEdit(todo),
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// 필터 바: 전체 / 미완료 / 완료 (개수 함께 표시)
+class _FilterBar extends StatelessWidget {
+  final TodoFilter filter;
+  final Map<TodoFilter, int> counts;
+  final ValueChanged<TodoFilter> onChanged;
+
+  const _FilterBar({
+    required this.filter,
+    required this.counts,
+    required this.onChanged,
+  });
+
+  static const _labels = {
+    TodoFilter.all: '전체',
+    TodoFilter.pending: '미완료',
+    TodoFilter.done: '완료',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: TodoFilter.values.map((f) {
+        final selected = f == filter;
+        return Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: ChoiceChip(
+            key: ValueKey('filter_${f.name}'),
+            label: Text('${_labels[f]} ${counts[f] ?? 0}'),
+            selected: selected,
+            showCheckmark: false,
+            onSelected: (_) => onChanged(f),
+            selectedColor: _Theme.primary,
+            backgroundColor: _Theme.surface,
+            side: BorderSide(color: selected ? _Theme.primary : _Theme.border),
+            labelStyle: TextStyle(
+              color: selected ? Colors.white : _Theme.muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+// 할 일 수정 시트
+class _EditTodoSheet extends StatefulWidget {
+  final Todo todo;
+  final Map<String, String> priorityLabel;
+
+  const _EditTodoSheet({required this.todo, required this.priorityLabel});
+
+  @override
+  State<_EditTodoSheet> createState() => _EditTodoSheetState();
+}
+
+class _EditTodoSheetState extends State<_EditTodoSheet> {
+  late final TextEditingController _text = TextEditingController(
+    text: widget.todo.text,
+  );
+  late final TextEditingController _due = TextEditingController(
+    text: widget.todo.due,
+  );
+  late String _priority = widget.todo.priority;
+  String _error = '';
+
+  @override
+  void dispose() {
+    _text.dispose();
+    _due.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final text = _text.text.trim();
+    if (text.isEmpty) {
+      setState(() => _error = '할 일을 입력해주세요');
+      return;
+    }
+    final due = _due.text.trim();
+    Navigator.pop(
+      context,
+      widget.todo.copyWith(
+        text: text,
+        due: due.isEmpty ? '기한 없음' : due,
+        priority: _priority,
+      ),
+    );
+  }
+
+  InputDecoration _decoration(String label, {String? error}) => InputDecoration(
+    labelText: label,
+    errorText: error,
+    filled: true,
+    fillColor: _Theme.background,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: _Theme.border),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        20,
+        20,
+        20 + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            '할 일 수정',
+            style: TextStyle(
+              color: _Theme.text,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            key: const Key('edit_text'),
+            controller: _text,
+            autofocus: true,
+            decoration: _decoration(
+              '할 일',
+              error: _error.isEmpty ? null : _error,
+            ),
+            onChanged: (_) {
+              if (_error.isNotEmpty) setState(() => _error = '');
+            },
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            key: const Key('edit_due'),
+            controller: _due,
+            decoration: _decoration('기한 (예: 내일 18:00)'),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            children: widget.priorityLabel.entries.map((e) {
+              return ChoiceChip(
+                key: ValueKey('edit_priority_${e.key}'),
+                label: Text(e.value),
+                selected: _priority == e.key,
+                onSelected: (_) => setState(() => _priority = e.key),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            key: const Key('edit_save'),
+            onPressed: _save,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _Theme.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text(
+              '저장',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
       ),
     );
   }

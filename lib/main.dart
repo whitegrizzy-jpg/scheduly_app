@@ -7,6 +7,7 @@ import 'screens/calendar_screen.dart';
 import 'screens/group_schedule_screen.dart';
 import 'screens/handwriting_screen.dart';
 import 'components/bottom_nav.dart';
+import 'data/todo_repository.dart';
 
 // export type Screen = 'home' | 'calendar' | 'group' | 'handwriting'
 enum ActiveScreen { home, calendar, group, handwriting }
@@ -17,7 +18,13 @@ class MockUser {
   static const String initial = 'D';
 }
 
+/// 앱 전역 서비스. 테스트에서는 [todos]를 메모리 저장소로 바꿔 끼운다.
+class AppServices {
+  static TodoRepository todos = SqfliteTodoRepository();
+}
+
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const MyApp());
 }
 

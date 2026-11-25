@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:scheduly_app/data/todo_repository.dart';
 import 'package:scheduly_app/main.dart';
 
 /// 로그인 화면에서 '로그인 없이 둘러보기'로 홈에 진입한다.
@@ -8,6 +9,7 @@ Future<void> enterHome(WidgetTester tester) async {
   tester.view.physicalSize = const Size(1080, 2400);
   tester.view.devicePixelRatio = 2.6;
   addTearDown(tester.view.reset);
+  AppServices.todos = InMemoryTodoRepository();
   await tester.pumpWidget(const MyApp());
   await tester.tap(find.byKey(const Key('demo_start')));
   await tester.pumpAndSettle();
@@ -65,5 +67,62 @@ void main() {
 
     expect(find.byKey(const Key('todo_empty_state')), findsOneWidget);
     expect(find.text('등록된 할 일이 없습니다'), findsOneWidget);
+  });
+
+  testWidgets('TC-05 필터: 미완료/완료/전체로 목록이 바뀐다', (tester) async {
+    await enterHome(tester);
+
+    await tester.tap(find.byKey(const ValueKey('filter_done')));
+    await tester.pumpAndSettle();
+    expect(find.text('체육관 예약하기'), findsOneWidget);
+    expect(find.text('캡스톤 설계 보고서 제출'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('filter_pending')));
+    await tester.pumpAndSettle();
+    expect(find.text('체육관 예약하기'), findsNothing);
+    expect(find.text('캡스톤 설계 보고서 제출'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('filter_all')));
+    await tester.pumpAndSettle();
+    expect(find.text('체육관 예약하기'), findsOneWidget);
+    expect(find.text('캡스톤 설계 보고서 제출'), findsOneWidget);
+  });
+
+  testWidgets('TC-06 수정: 수정 시트에서 제목·우선순위를 바꾸면 목록에 반영된다', (tester) async {
+    await enterHome(tester);
+    await tester.tap(find.byKey(const ValueKey('todo_edit_2')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('edit_text')),
+      '알고리즘 과제 3·4번 풀기',
+    );
+    await tester.tap(find.byKey(const ValueKey('edit_priority_high')));
+    await tester.tap(find.byKey(const Key('edit_save')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('알고리즘 과제 3·4번 풀기'), findsOneWidget);
+    expect(find.text('알고리즘 과제 3번 풀기'), findsNothing);
+    expect(find.text('긴급'), findsNWidgets(2));
+  });
+
+  testWidgets('수정 시 빈 제목은 저장되지 않는다', (tester) async {
+    await enterHome(tester);
+    await tester.tap(find.byKey(const ValueKey('todo_edit_2')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('edit_text')), '  ');
+    await tester.tap(find.byKey(const Key('edit_save')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('할 일을 입력해주세요'), findsOneWidget);
+  });
+
+  testWidgets('저장소 반영: 화면에서 바꾼 내용이 저장소에 기록된다', (tester) async {
+    await enterHome(tester);
+    await tester.tap(find.text('캡스톤 설계 보고서 제출'));
+    await tester.pump();
+
+    final saved = await AppServices.todos.loadAll();
+    expect(saved.firstWhere((t) => t.id == 1).done, isTrue);
   });
 }
