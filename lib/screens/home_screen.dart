@@ -1,6 +1,8 @@
-import 'login_screen.dart';
-
 import 'package:flutter/material.dart';
+
+import '../data/sample_todos.dart';
+import '../main.dart';
+import '../models/todo.dart';
 
 // Figma 테마 색상 정의 (프로젝트 스타일에 맞게 수정 가능)
 class _Theme {
@@ -14,23 +16,6 @@ class _Theme {
   static const Color primaryLight = Color(0xff8c85ff); // 연한 포인트 색상
   static const Color accent = Color(0xffff6b6b); // 강조 (오늘 마감 등)
   static const Color green = Color(0xff4ade80); // 완료 색상
-}
-
-// 데이터 모델 정의
-class Todo {
-  final int id;
-  final String text;
-  bool done;
-  final String due;
-  final String priority; // 'high' | 'mid' | 'low'
-
-  Todo({
-    required this.id,
-    required this.text,
-    required this.done,
-    required this.due,
-    required this.priority,
-  });
 }
 
 class Memo {
@@ -73,35 +58,13 @@ class _HomeScreenState extends State<HomeScreen> {
   late List<Memo> _memos;
 
   bool _showInput = false;
+  String _inputError = '';
   final TextEditingController _todoController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _todos = [
-      Todo(
-        id: 1,
-        text: '캡스톤 설계 보고서 제출',
-        done: false,
-        due: '오늘 18:00',
-        priority: 'high',
-      ),
-      Todo(
-        id: 2,
-        text: '알고리즘 과제 3번 풀기',
-        done: false,
-        due: '내일 23:59',
-        priority: 'mid',
-      ),
-      Todo(
-        id: 3,
-        text: '데이터베이스 중간고사 공부',
-        done: false,
-        due: '10월 15일',
-        priority: 'mid',
-      ),
-      Todo(id: 4, text: '체육관 예약하기', done: true, due: '완료', priority: 'low'),
-    ];
+    _todos = buildSampleTodos();
 
     _memos = [
       Memo(
@@ -127,10 +90,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // 로직 함수들 구현
   void _addTodo() {
-    final text = _todoController.text;
-    if (text.trim().isEmpty) return;
+    final text = _todoController.text.trim();
+    if (text.isEmpty) {
+      // 공백만 입력한 경우 추가하지 않고 안내 문구를 보여 준다.
+      setState(() => _inputError = '할 일을 입력해주세요');
+      return;
+    }
 
     setState(() {
+      _inputError = '';
       _todos.insert(
         0,
         Todo(
@@ -153,6 +121,31 @@ class _HomeScreenState extends State<HomeScreen> {
           todo.done = !todo.done;
         }
       }
+    });
+  }
+
+  void _deleteTodo(Todo todo) {
+    final index = _todos.indexOf(todo);
+    setState(() => _todos.remove(todo));
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text("'${todo.text}' 삭제됨"),
+          duration: const Duration(seconds: 3),
+          persist: false,
+          action: SnackBarAction(
+            label: '되돌리기',
+            onPressed: () => setState(() => _todos.insert(index, todo)),
+          ),
+        ),
+      );
+  }
+
+  void _openInput() {
+    setState(() {
+      _showInput = true;
+      _inputError = '';
     });
   }
 
@@ -180,7 +173,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final pending = _todos.where((t) => !t.done).toList();
     final done = _todos.where((t) => t.done).toList();
-    final todayDueCount = _todos.where((t) => t.due.contains('오늘')).length;
+    final todayDueCount = _todos
+        .where((t) => !t.done && t.due.contains('오늘'))
+        .length;
 
     return Scaffold(
       backgroundColor: _Theme.background,
@@ -190,7 +185,7 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 1. Header (안녕하세요, 김민준님)
+              // 1. Header (안녕하세요, 데모 사용자님)
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,7 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 2),
                       const Text(
-                        '김민준님',
+                        '${MockUser.name}님',
                         style: TextStyle(
                           color: _Theme.text,
                           fontSize: 24,
@@ -256,7 +251,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       alignment: Alignment.center,
                       child: const Text(
-                        '김',
+                        MockUser.initial,
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 16,
@@ -304,7 +299,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   GestureDetector(
-                    onTap: () => setState(() => _showInput = !_showInput),
+                    key: const Key('todo_add_toggle'),
+                    onTap: () => _showInput
+                        ? setState(() {
+                            _showInput = false;
+                            _inputError = '';
+                          })
+                        : _openInput(),
                     child: Container(
                       width: 28,
                       height: 28,
@@ -336,11 +337,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         decoration: BoxDecoration(
                           color: _Theme.surface,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: _Theme.border),
+                          border: Border.all(
+                            color: _inputError.isNotEmpty
+                                ? _Theme.accent
+                                : _Theme.border,
+                          ),
                         ),
                         child: TextField(
+                          key: const Key('todo_input'),
                           controller: _todoController,
                           autofocus: true,
+                          onChanged: (_) {
+                            if (_inputError.isNotEmpty) {
+                              setState(() => _inputError = '');
+                            }
+                          },
                           style: const TextStyle(
                             color: _Theme.text,
                             fontSize: 14,
@@ -360,6 +371,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(width: 8),
                     ElevatedButton(
+                      key: const Key('todo_add_button'),
                       onPressed: _addTodo,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _Theme.primary,
@@ -383,46 +395,71 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-              ],
-
-              // Todo List Items (진행 중 / 완료됨 리스트)
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ...pending.map(
-                    (t) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8.0),
-                      child: _TodoCardWidget(
-                        todo: t,
-                        onToggle: _toggleTodo,
-                        priorityColor: priorityColor,
-                        priorityLabel: priorityLabel,
+                if (_inputError.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6, left: 4),
+                    child: Text(
+                      '⚠️ $_inputError',
+                      style: const TextStyle(
+                        color: _Theme.accent,
+                        fontSize: 12,
                       ),
                     ),
                   ),
-                  if (done.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
-                      child: Text(
-                        '완료됨',
-                        style: TextStyle(color: _Theme.muted, fontSize: 12),
+                const SizedBox(height: 12),
+              ],
+
+              // 할 일이 하나도 없을 때: 빈 상태 안내 화면
+              if (_todos.isEmpty)
+                _EmptyTodoState(onAdd: _openInput)
+              else
+                // Todo List Items (진행 중 / 완료됨 리스트)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (pending.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 8.0),
+                        child: Text(
+                          '🎉 남은 할 일이 없어요. 모두 완료했습니다!',
+                          style: TextStyle(color: _Theme.muted, fontSize: 13),
+                        ),
                       ),
-                    ),
-                    ...done.map(
+                    ...pending.map(
                       (t) => Padding(
                         padding: const EdgeInsets.only(bottom: 8.0),
                         child: _TodoCardWidget(
                           todo: t,
                           onToggle: _toggleTodo,
+                          onDelete: _deleteTodo,
                           priorityColor: priorityColor,
                           priorityLabel: priorityLabel,
                         ),
                       ),
                     ),
+                    if (done.isNotEmpty) ...[
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
+                        child: Text(
+                          '완료됨',
+                          style: TextStyle(color: _Theme.muted, fontSize: 12),
+                        ),
+                      ),
+                      ...done.map(
+                        (t) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8.0),
+                          child: _TodoCardWidget(
+                            todo: t,
+                            onToggle: _toggleTodo,
+                            onDelete: _deleteTodo,
+                            priorityColor: priorityColor,
+                            priorityLabel: priorityLabel,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
+                ),
               const SizedBox(height: 24),
               // 4. Memos Section
               Row(
@@ -465,6 +502,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: _memos
                     .map(
                       (m) => Container(
+                        width: double.infinity,
                         margin: const EdgeInsets.only(bottom: 8),
                         decoration: BoxDecoration(
                           color: _Theme.surface,
@@ -476,7 +514,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: Stack(
                           children: [
                             Padding(
-                              padding: const EdgeInsets.all(16.0),
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                16,
+                                40,
+                                16,
+                              ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -566,22 +609,94 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// 5. TodoCard Component 위젯 구현 (모든 경고 및 최신 API 반영 완료)
+// 빈 상태 안내 위젯
+class _EmptyTodoState extends StatelessWidget {
+  final VoidCallback onAdd;
+
+  const _EmptyTodoState({required this.onAdd});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('todo_empty_state'),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
+      decoration: BoxDecoration(
+        color: _Theme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _Theme.border),
+      ),
+      child: Column(
+        children: [
+          const Text('🗒️', style: TextStyle(fontSize: 40)),
+          const SizedBox(height: 12),
+          const Text(
+            '등록된 할 일이 없습니다',
+            style: TextStyle(
+              color: _Theme.text,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '+ 버튼을 눌러 첫 할 일을 추가해 보세요',
+            style: TextStyle(color: _Theme.muted, fontSize: 13),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton(
+            onPressed: onAdd,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _Theme.primary,
+              side: const BorderSide(color: _Theme.primary),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text('할 일 추가하기'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 5. TodoCard Component: 탭하면 완료 토글, 왼쪽으로 밀면 삭제
 class _TodoCardWidget extends StatelessWidget {
   final Todo todo;
   final Function(int) onToggle;
+  final Function(Todo) onDelete;
   final Map<String, Color> priorityColor;
   final Map<String, String> priorityLabel;
 
   const _TodoCardWidget({
     required this.todo,
     required this.onToggle,
+    required this.onDelete,
     required this.priorityColor,
     required this.priorityLabel,
   });
 
   @override
   Widget build(BuildContext context) {
+    return Dismissible(
+      key: ValueKey('todo_${todo.id}'),
+      direction: DismissDirection.endToStart,
+      onDismissed: (_) => onDelete(todo),
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: _Theme.accent,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Icon(Icons.delete_outline, color: Colors.white),
+      ),
+      child: _buildCard(),
+    );
+  }
+
+  Widget _buildCard() {
     final pColor = priorityColor[todo.priority] ?? Colors.grey;
     final pLabel = priorityLabel[todo.priority] ?? '보통';
 
@@ -714,7 +829,7 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: const Text(
-                  '김',
+                  MockUser.initial,
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 32,
@@ -724,7 +839,7 @@ class ProfileScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               const Text(
-                '김민준님',
+                '${MockUser.name}님',
                 style: TextStyle(
                   color: _Theme.text,
                   fontSize: 22,
@@ -732,7 +847,7 @@ class ProfileScreen extends StatelessWidget {
                 ),
               ),
               const Text(
-                'minjun@example.com',
+                '데모 계정',
                 style: TextStyle(color: _Theme.muted, fontSize: 14),
               ),
               const SizedBox(height: 40),
@@ -830,13 +945,11 @@ class ProfileScreen extends StatelessWidget {
               onPressed: () {
                 Navigator.pop(context); // 1. 우선 로그아웃 팝업창을 닫습니다.
 
-                // 2. ✨ 핵심 기능을 가진 실제 코드 작동:
-                // 이전의 모든 화면 기록을 지우고 분리된 실제 LoginScreen으로 이동시킵니다.
+                // 2. 이전 화면 기록을 지우고 앱 루트(로그인 상태 초기화)로 돌아갑니다.
+                //    AppRoot가 로그인 화면을 보여 주고, 다시 로그인하면 홈으로 진입합니다.
                 Navigator.pushAndRemoveUntil(
                   context,
-                  MaterialPageRoute(
-                    builder: (context) => LoginScreen(onLogin: () {}),
-                  ),
+                  MaterialPageRoute(builder: (context) => const AppRoot()),
                   (route) => false, // 이 조건에 의해 이전의 모든 뒤로가기 기록이 파괴됩니다.
                 );
               },

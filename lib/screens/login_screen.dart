@@ -13,8 +13,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  static const String validId = 'user1';
-  static const String validPw = '1234';
+  // 계정 정보는 소스에 두지 않는다. 실제 인증은 MP3에서 BaaS(Firebase Auth)로 연결한다.
+  // MP1·MP2 단계에서는 아이디·비밀번호가 입력되기만 하면 데모 모드로 진입한다.
 
   final TextEditingController _idController = TextEditingController();
   final TextEditingController _pwController = TextEditingController();
@@ -31,7 +31,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _handleLogin() {
-    if (_idController.text == validId && _pwController.text == validPw) {
+    if (_idController.text.trim().isNotEmpty && _pwController.text.isNotEmpty) {
       setState(() {
         _error = '';
       });
@@ -41,7 +41,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
     } else {
       setState(() {
-        _error = '아이디 또는 비밀번호가 올바르지 않습니다.';
+        _error = '아이디와 비밀번호를 입력해주세요.';
       });
     }
   }
@@ -236,23 +236,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
 
                   const SizedBox(height: 16),
-                  const Text.rich(
-                    TextSpan(
-                      text: '테스트: ID ',
-                      children: [
-                        TextSpan(
-                          text: 'user1',
-                          style: TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold),
-                        ),
-                        TextSpan(text: ' / PW '),
-                        TextSpan(
-                          text: '1234',
-                          style: TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    ),
+                  const Text(
+                    '데모 모드: 아무 아이디·비밀번호나 입력하면 시작합니다',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: AppColors.muted),
+                  ),
+                  TextButton(
+                    key: const Key('demo_start'),
+                    onPressed: widget.onLogin,
+                    child: const Text(
+                      '로그인 없이 둘러보기',
+                      style: TextStyle(fontSize: 13, color: AppColors.primary, fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ],
               ),

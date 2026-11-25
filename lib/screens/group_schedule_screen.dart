@@ -80,11 +80,11 @@ class _GroupScheduleScreenState extends State<GroupScheduleScreen> {
       description: '프로젝트 역할 분담 및 일정 수립',
       myStatus: 'accepted',
       members: [
-        GroupMember(id: 'm1', name: '김민준', avatar: '김', status: 'accepted'),
-        GroupMember(id: 'm2', name: '이서연', avatar: '이', status: 'accepted'),
-        GroupMember(id: 'm3', name: '박도현', avatar: '박', status: 'pending'),
-        GroupMember(id: 'm4', name: '최유진', avatar: '최', status: 'declined'),
-        GroupMember(id: 'm5', name: '정하은', avatar: '정', status: 'accepted'),
+        GroupMember(id: 'm1', name: '나', avatar: '나', status: 'accepted'),
+        GroupMember(id: 'm2', name: '팀원A', avatar: 'A', status: 'accepted'),
+        GroupMember(id: 'm3', name: '팀원B', avatar: 'B', status: 'pending'),
+        GroupMember(id: 'm4', name: '팀원C', avatar: 'C', status: 'declined'),
+        GroupMember(id: 'm5', name: '팀원D', avatar: 'D', status: 'accepted'),
       ],
     ),
     GroupSchedule(
@@ -97,10 +97,10 @@ class _GroupScheduleScreenState extends State<GroupScheduleScreen> {
       description: '7장 정규화 개념 정리 및 퀴즈',
       myStatus: 'pending',
       members: [
-        GroupMember(id: 'n1', name: '김민준', avatar: '김', status: 'pending'),
-        GroupMember(id: 'n2', name: '오지민', avatar: '오', status: 'accepted'),
-        GroupMember(id: 'n3', name: '윤채원', avatar: '윤', status: 'accepted'),
-        GroupMember(id: 'n4', name: '강태양', avatar: '강', status: 'accepted'),
+        GroupMember(id: 'n1', name: '나', avatar: '나', status: 'pending'),
+        GroupMember(id: 'n2', name: '팀원E', avatar: 'E', status: 'accepted'),
+        GroupMember(id: 'n3', name: '팀원F', avatar: 'F', status: 'accepted'),
+        GroupMember(id: 'n4', name: '팀원G', avatar: 'G', status: 'accepted'),
       ],
     ),
     GroupSchedule(
@@ -113,12 +113,12 @@ class _GroupScheduleScreenState extends State<GroupScheduleScreen> {
       description: '해커톤 준비 및 신입 환영회',
       myStatus: 'declined',
       members: [
-        GroupMember(id: 'p1', name: '김민준', avatar: '김', status: 'declined'),
-        GroupMember(id: 'p2', name: '한수아', avatar: '한', status: 'accepted'),
-        GroupMember(id: 'p3', name: '임지호', avatar: '임', status: 'accepted'),
-        GroupMember(id: 'p4', name: '서민재', avatar: '서', status: 'pending'),
-        GroupMember(id: 'p5', name: '노예린', avatar: '노', status: 'accepted'),
-        GroupMember(id: 'p6', name: '백준혁', avatar: '백', status: 'accepted'),
+        GroupMember(id: 'p1', name: '나', avatar: '나', status: 'declined'),
+        GroupMember(id: 'p2', name: '팀원H', avatar: 'H', status: 'accepted'),
+        GroupMember(id: 'p3', name: '팀원I', avatar: 'I', status: 'accepted'),
+        GroupMember(id: 'p4', name: '팀원J', avatar: 'J', status: 'pending'),
+        GroupMember(id: 'p5', name: '팀원K', avatar: 'K', status: 'accepted'),
+        GroupMember(id: 'p6', name: '팀원L', avatar: 'L', status: 'accepted'),
       ],
     ),
   ];
@@ -131,7 +131,7 @@ class _GroupScheduleScreenState extends State<GroupScheduleScreen> {
         if (s.id == id) {
           s.myStatus = status;
           for (var m in s.members) {
-            if (m.name == '김민준') {
+            if (m.name == '나') {
               m.status = status;
             }
           }

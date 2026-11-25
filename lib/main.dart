@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'constants/app_colors.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
@@ -10,11 +11,10 @@ import 'components/bottom_nav.dart';
 // export type Screen = 'home' | 'calendar' | 'group' | 'handwriting'
 enum ActiveScreen { home, calendar, group, handwriting }
 
-// export const MOCK_USER = { id: 'user1', name: '김민준', email: 'minjun@example.com' }
+// 데모 사용자 (실제 개인정보 아님)
 class MockUser {
-  static const String id = 'user1';
-  static const String name = '김민준';
-  static const String email = 'minjun@example.com';
+  static const String name = '데모 사용자';
+  static const String initial = 'D';
 }
 
 void main() {
@@ -69,13 +69,13 @@ class _AppRootState extends State<AppRoot> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 448), // Tailwind max-w-md
+            constraints: const BoxConstraints(
+              maxWidth: 448,
+            ), // Tailwind max-w-md
             child: Column(
               children: [
                 // 화면 본문 영역 (flex-1 overflow-y-auto)
-                Expanded(
-                  child: _buildCurrentScreen(),
-                ),
+                Expanded(child: _buildCurrentScreen()),
                 // 하단 네비게이션 바 (<BottomNav active={activeScreen} onChange={setActiveScreen} />)
                 BottomNav(
                   active: _activeScreen,
