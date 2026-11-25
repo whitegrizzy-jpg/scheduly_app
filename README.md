@@ -1,14 +1,15 @@
-# Scheduly — 할 일 앱 (주제 #2109 MP3: 백엔드 서비스로 동기화하기)
+# Scheduly — 할 일 앱 (주제 #2109 MP4: 온디바이스 AI로 종이 메모 가져오기)
 
-Flutter 할 일 앱입니다. MP2의 로컬 저장(SQLite) CRUD에 이어 MP3에서는 **Firebase(Authentication + Cloud Firestore)** 와 연동해
-**같은 계정으로 로그인한 여러 기기에서 같은 목록**을 보고, **오프라인에서 쓴 항목이 온라인으로 돌아오면 서버에 반영**되도록 했습니다.
+Flutter 할 일 앱입니다. MP1(화면) → MP2(SQLite 저장·CRUD) → MP3(Firebase 동기화)에 이어 MP4에서는
+**종이 메모 사진을 찍거나 고르면 기기 안의 OCR(Google ML Kit)이 글자를 읽어 줄 단위 할 일 후보로 만들고**,
+사용자가 확인·수정한 항목만 저장하는 기능을 추가했습니다. 서버 없이 동작하므로 **비행기 모드에서도 인식**됩니다.
 
 ## 실행 절차
 
 - 프레임워크/SDK: **Flutter 3.47.5 (stable) / Dart 3.13.4**
-- 실행 기기: Android 에뮬레이터 **Pixel_8 (기기 A)**, **Pixel_8_B (기기 B)** — 둘 다 Android 17 / API 37, 1080×2400
-- 백엔드: **Firebase** 무료 요금제(Spark) — Authentication(이메일/비밀번호), Cloud Firestore(서울 `asia-northeast3`)
-- 주요 패키지: `firebase_core 5.x`, `firebase_auth 7.x`, `cloud_firestore 7.x`, `connectivity_plus 7.x`, `sqflite 2.4.x`
+- 실행 기기: Android 에뮬레이터 **Pixel_8 (Android 17 / API 37, 1080×2400, x86_64)**
+- 온디바이스 OCR: **Google ML Kit Text Recognition v2** — `google_mlkit_text_recognition ^1.0.3` + 번들형 한국어 모델 `com.google.mlkit:text-recognition-korean:16.0.1`(라틴 문자 포함)
+- 사진·권한: `image_picker ^1.2.4`(카메라/시스템 사진 선택기), `permission_handler ^12.0.1`, `path_provider ^2.1.6`
 - 잠금 파일: `pubspec.lock`, `android/gradle/wrapper/gradle-wrapper.properties`
 
 제출 ZIP에서는 Flutter 프로젝트가 `app/` 폴더에 있으므로 먼저 `cd app` 한 뒤 실행합니다.
@@ -16,145 +17,166 @@ Flutter 할 일 앱입니다. MP2의 로컬 저장(SQLite) CRUD에 이어 MP3에
 ```bash
 flutter --version                      # Flutter 3.47.5 / Dart 3.13.4 확인
 flutter pub get
-cp .env.example .env                   # 아래 "백엔드 설정 절차"대로 값을 채운다
 flutter emulators --launch Pixel_8
-flutter run --dart-define-from-file=.env
+flutter run                            # 로컬 전용 모드 (OCR 확인에는 서버가 필요 없음)
+# 서버 동기화까지 쓰려면: cp .env.example .env 후 값 입력 → flutter run --dart-define-from-file=.env
 ```
 
-두 번째 기기(동기화 확인용):
+테스트용 메모 픽스처(개인정보 없는 합성 이미지)를 만들어 에뮬레이터 갤러리에 넣습니다.
 
 ```bash
-flutter emulators --launch Pixel_8_B
-flutter run -d emulator-5556 --dart-define-from-file=.env
+python tools/make_memo_fixture.py
+adb push fixtures/memo_fixture.png /sdcard/Pictures/memo_fixture.png
+adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/memo_fixture.png
 ```
 
-테스트 실행 (위젯 8개 + SQLite 3개 + 동기화 시나리오 7개 = 18개, 서버 없이 실행됨):
+테스트 실행 (MP1~MP3 18개 + MP4 6개 = 24개):
 
 ```bash
 flutter test
 ```
 
-- `.env` 없이 `flutter run`만 하면 서버 동기화 없이 **로컬 전용 모드**(MP2와 동일)로 동작합니다.
-- 클라우드 모드에서는 로그인 화면의 **회원가입**으로 테스트 계정(예: `test1@example.com` 같은 더미 주소)을 만든 뒤, 두 기기에서 **같은 계정으로 로그인**합니다.
+앱에서는 하단 탭 **📷 메모 스캔**을 엽니다.
+(로그인 화면에서는 「로그인 없이 둘러보기」로 들어가도 됩니다. Firebase 설정과 동기화는 MP3 README 내용과 같고, 아래 "MP3 동기화"에 요약했습니다.)
 
-## 백엔드 설정 절차 (Firebase)
+## 인식 기능과 라이브러리
 
-1. [Firebase 콘솔](https://console.firebase.google.com)에서 프로젝트를 만든다 (애널리틱스는 꺼도 됨).
-2. **Authentication → 로그인 방법 → 이메일/비밀번호** 사용 설정
-3. **Firestore Database → 데이터베이스 만들기** (위치 `asia-northeast3`, 프로덕션 모드) → **규칙** 탭에 [`firebase/firestore.rules`](firebase/firestore.rules) 내용을 붙여넣고 게시
-4. **프로젝트 설정 → 내 앱 → Android 앱 추가**, 패키지 이름 `com.example.scheduly_app`
-5. 같은 화면의 값으로 `.env`를 채운다. API 키는 내려받은 `google-services.json`의 `current_key` 값이다.
-
-| `.env` 키 | 값을 찾는 곳 |
+| 항목 | 내용 |
 |---|---|
-| `FIREBASE_API_KEY` | `google-services.json` → `client[0].api_key[0].current_key` |
-| `FIREBASE_APP_ID` | 프로젝트 설정 → 내 앱 → 앱 ID (`1:…:android:…`) |
-| `FIREBASE_MESSAGING_SENDER_ID` | 프로젝트 번호 (앱 ID 가운데 숫자) |
-| `FIREBASE_PROJECT_ID` | 프로젝트 ID |
-| `FIREBASE_STORAGE_BUCKET` | (선택) 비워도 됨 |
+| 라이브러리 | Google ML Kit Text Recognition v2 (`TextRecognizer(script: korean)`) |
+| 실행 위치 | **기기 안** (번들형 모델 — 앱 설치 시 포함, 실행 중 내려받지 않음) |
+| 지원 문자 | 한글 + 영문/숫자 (한국어 스크립트 모델이 라틴 문자도 인식) |
+| 입력 | 카메라 촬영 또는 시스템 사진 선택기(Android Photo Picker — 고른 사진에만 접근) |
+| 출력 | 블록 → 줄 순서의 텍스트 → `extractCandidates()`로 정리한 할 일 후보 |
+| 후보 정리 규칙 | 글머리표(- • □ [ ])·번호(1. 2) ①) 제거, 빈 줄·1글자·숫자/기호만 있는 줄 제외, 중복 제거, 100자 제한 (`lib/ocr/memo_parser.dart`) |
 
-### 설정 키 분리
+**ML Kit을 고른 이유**: 9주차 보고서의 비교(ML Kit / LiteRT / Apple Vision / MediaPipe)에서 ML Kit만 Android·Flutter에서 한국어 OCR을 별도 모델 포팅 없이 바로 쓸 수 있었습니다. 번들형 모델을 선택해 Google Play 서비스의 모델 다운로드에 기대지 않고, 설치 직후부터 오프라인에서 동작합니다. (대가로 APK가 커집니다.)
 
-- 키는 소스에 없습니다. `--dart-define-from-file=.env`로 **빌드할 때만** 주입되고, `lib/config/env.dart`에서 읽습니다.
-- `.env`, `.env.*`, `google-services.json`, `firebase_options.dart`는 `.gitignore`에 있습니다. 저장소와 제출물에는 **`.env.example`(빈 값)만** 들어 있습니다.
-- 데이터 보호는 키를 숨기는 것이 아니라 **보안 규칙**으로 합니다: 로그인한 사용자는 자기 `uid` 아래(`users/{uid}/todos`)만 읽고 쓸 수 있습니다.
+## 검토 UI 흐름
 
-## 선택한 BaaS: Firebase, 그리고 이유
+```
+[📷 촬영하기] 또는 [🖼 갤러리에서 선택]
+   │  (카메라는 권한 요청 → 거부 시 안내 + "권한 다시 요청/설정 열기/갤러리에서 선택")
+   ▼
+기기에서 글자를 읽는 중… (ML Kit, 처리 시간 측정)
+   │  → 인식이 끝나면 사진 파일 즉시 삭제
+   ▼
+검토 화면: ⏱ 처리 시간 · 줄 수 → 후보 수 · "원본 사진은 삭제되었습니다"
+   - 후보마다 체크박스(선택/해제) + 바로 고칠 수 있는 입력칸
+   - 모두 선택/해제, 다시 찍기
+   ▼
+[선택한 n개 추가] → 할 일 목록에 저장 (메모 위쪽 줄이 목록 위) → 홈 탭으로 이동
+   (로그인 상태면 MP3 동기화 대기열을 거쳐 서버에도 반영 — 오프라인이면 대기)
+```
 
-| 항목 | **Firebase (선택)** | Supabase |
+- 원본 사진은 검토 화면에도 띄우지 않습니다. 보이는 것은 인식된 글자뿐입니다.
+
+## 처리 시간 측정값
+
+측정 방법: `Stopwatch`로 `TextRecognizer.processImage()` 실행 시간(인식)과 사진 선택 직후부터 후보 정리까지(전체)를 재서 검토 화면에 보여 줍니다(`lib/ocr/memo_ocr_service.dart`).
+입력: `fixtures/memo_fixture.png`(1266×1552, image_picker가 최대 2000px로 다시 인코딩) — 제목 1줄 + 할 일 5줄, 인식 8줄 → 후보 6개.
+기기: Pixel_8 에뮬레이터(x86_64, 호스트 PC 공유), 디버그 빌드.
+
+| 회차 | 네트워크 | 인식(processImage) | 전체 | 결과 |
+|---|---|---|---|---|
+| 1 (첫 실행, 모델 로딩 포함) | ✈️ 비행기 모드 | **2.52초** | 2.53초 | 6줄 모두 정확 |
+| 2 | ✈️ 비행기 모드 | 1.71초 | 1.71초 | 동일 |
+| 3 | ✈️ 비행기 모드 | 1.96초 | 1.96초 | 동일 |
+| 4 | ✈️ 비행기 모드 | 1.92초 | 1.93초 | 동일 |
+| 5 | 온라인(Wi-Fi) | 1.86초 | 1.86초 | 동일 |
+| 6 | 온라인(Wi-Fi) | 1.77초 | 1.77초 | 동일 |
+| 7 | 온라인(Wi-Fi) | 1.83초 | 1.83초 | 동일 |
+
+- **비행기 모드 평균(2~4회) 1.86초 ≈ 온라인 평균 1.82초**: 네트워크 유무와 상관없이 같은 시간이 걸려, 인식이 서버가 아니라 기기에서 일어난다는 근거가 됩니다.
+- 첫 실행만 모델을 메모리에 올리느라 약 0.7초 더 걸립니다.
+- 에뮬레이터 디버그 빌드 기준이라, 실기기 릴리스 빌드에서는 더 빠를 것으로 예상합니다. (LG 실기기 측정은 아직 하지 않았습니다.)
+
+## 프라이버시 원칙 (원본 사진 미저장) — 코드로 지키는 방법
+
+| 원칙 | 구현 | 위치 |
 |---|---|---|
-| 데이터베이스 | Cloud Firestore (문서형 NoSQL) | PostgreSQL (관계형) |
-| Flutter 지원 | 공식 FlutterFire 플러그인 (`firebase_auth`, `cloud_firestore`) | 공식 `supabase_flutter` |
-| 실시간 변경 | 문서 스냅샷 리스너 기본 제공 | Realtime(Postgres 변경 구독) |
-| 서버 쪽 비교 후 쓰기 | 트랜잭션(`runTransaction`)으로 바로 가능 | RPC(SQL 함수) 또는 정책 작성 필요 |
-| 접근 제어 | 보안 규칙 (경로 + `request.auth.uid`) | Row Level Security 정책 |
-| 무료 요금제 | Spark: 읽기 5만·쓰기 2만/일 | 프로젝트 2개, 7일 비활성 시 일시 중지 |
+| 사진을 서버로 보내지 않음 | 번들형 온디바이스 모델만 사용, 사진을 업로드하는 코드 없음. 동기화되는 것은 사용자가 고른 **텍스트**뿐 | `MlKitMemoRecognizer` |
+| 인식 후 사진 즉시 삭제 | `recognizeAndDiscard()`의 `finally`에서 성공·실패와 상관없이 사진 파일을 지우고, image_picker 캐시의 사본도 삭제 | `PhotoDisposal.discard()` |
+| 남은 임시 사진 정리 | 앱 시작 시 캐시 폴더의 jpg/png/heic/webp를 모두 삭제 (비정상 종료로 남은 파일 대비) | `main()` → `PhotoDisposal.purgePickerCache()` |
+| 갤러리에 저장하지 않음 | 카메라 촬영본은 앱 캐시에 임시로만 생기고 갤러리에 저장하지 않음 | `DevicePhotoSource.pick()` |
+| 메타데이터 최소화 | `requestFullMetadata: false`로 위치 등 EXIF를 요청하지 않음 | 〃 |
+| 화면에 원본 미표시 | 검토 화면은 인식된 글자만 보여 줌 | `MemoScanScreen` |
+| 고른 사진만 접근 | 시스템 사진 선택기 사용 → 저장소 전체 읽기 권한을 요청하지 않음 | 〃 |
 
-1. 팀이 9주차 기술 보고서에서 이미 Firebase를 골랐고, Authentication과 데이터베이스를 한 콘솔에서 바로 설정할 수 있습니다.
-2. 동기화 충돌 처리에 필요한 **"서버 값과 비교한 뒤 더 최신일 때만 쓰기"** 를 Firestore 트랜잭션으로 SQL 함수 없이 클라이언트 코드에서 구현할 수 있습니다.
-3. 할 일 데이터는 사용자별 독립 목록이라 관계형 JOIN이 필요 없고, `users/{uid}/todos/{id}` 문서 구조와 경로 기반 보안 규칙이 잘 맞습니다.
-4. 무료 요금제에 일시 중지 정책이 없어, 과제 검수 기간에 서버가 멈출 걱정이 없습니다.
+**확인**: 인식·저장 후 `adb shell run-as com.example.scheduly_app find /data/data/com.example.scheduly_app -type f`로 앱 저장소 전체를 확인한 결과, 사진 파일(jpg/png/heic/webp)이 **0개**였습니다. 남은 파일은 SQLite DB, Firebase·ML Kit 설정 파일뿐입니다.
+(참고: ML Kit은 자체적으로 익명 사용 통계를 `datatransport` DB에 기록할 수 있지만 이미지는 포함되지 않습니다.)
 
-## 동기화 구조와 충돌 처리 방침
+### 권한 거부 처리
 
-```
-화면 ──▶ SyncingTodoRepository ──▶ SQLite (로컬, 항상 먼저 저장)
-                                      │  sync_status = pending (대기열)
-                                      ▼
-                                 SyncService ──push──▶ Firestore users/{uid}/todos/{id}
-                                      ▲      ◀─pull── (실시간 리스너 + 새로고침)
-                         connectivity_plus (온라인/오프라인 감지)
-```
-
-### 오프라인 → 온라인 흐름
-
-1. 추가·수정·완료·삭제는 **항상 로컬 SQLite에 먼저 저장**하고 `sync_status = pending`, `updated_at = 지금`으로 표시합니다. 그래서 오프라인에서도 화면에 바로 반영됩니다.
-2. 온라인이면 대기 항목을 **오래된 순서대로** 서버에 올리고, 성공하면 `synced`로 바꿉니다.
-3. 오프라인이면 홈 화면 배지에 `📴 오프라인 · 대기 n건`이 보이고, 대기열은 기기에 남아 있습니다(앱을 꺼도 유지).
-4. **네트워크가 다시 연결되면**(`connectivity_plus` 이벤트) 자동으로 대기열을 올리고, 실패하면 20초마다 다시 시도합니다. 배지를 누르거나 목록을 당겨도 즉시 동기화합니다.
-5. 서버 쪽 변경은 Firestore 실시간 리스너와 새로고침(당겨서 새로고침)으로 받아 로컬에 반영합니다.
-6. Firestore 자체 오프라인 캐시는 끄고(`persistenceEnabled: false`) 대기열을 앱이 직접 관리합니다. 대기 건수를 화면에 보여 주고, 충돌 규칙을 한곳(`SyncService`)에서 통제하기 위해서입니다.
-
-### 충돌 처리 방침: 마지막 수정 우선 (Last-Write-Wins, 항목 단위)
-
-- 모든 항목에 `updated_at`(마지막 수정 시각, 밀리초)을 둡니다.
-- **서버에 올릴 때**: Firestore 트랜잭션으로 서버 문서를 읽어 `서버.updated_at ≥ 내 updated_at`이면 쓰지 않고 서버 값을 받아 로컬을 덮어씁니다. 내 값이 더 최신일 때만 기록합니다. 두 기기가 동시에 올려도 더 최신 값만 남습니다.
-- **서버에서 받을 때**: `서버.updated_at > 로컬.updated_at`일 때만 로컬에 반영합니다. 로컬이 더 최신(아직 못 올린 변경)이면 무시하고, 이후 로컬 값이 서버로 올라갑니다.
-- **삭제**: 행을 바로 지우지 않고 `deleted = true`인 **삭제 표시(tombstone)** 로 저장해 같은 규칙으로 전파합니다. 그래서 "한 기기에서 삭제, 다른 기기에서 옛 값 재업로드"로 삭제한 항목이 되살아나지 않습니다.
-- **판단 이유**: 할 일 한 건은 제목·기한·완료 여부가 짧고 한 사람이 쓰는 데이터라, 필드 단위 병합보다 "가장 나중에 고친 내용"을 남기는 편이 사용자가 예상하기 쉽고 구현·검증이 단순합니다.
-- **한계와 보완**: 기기 시계가 크게 틀리면 순서가 뒤바뀔 수 있습니다(같은 계정의 개인 기기 기준이라 허용). 같은 항목을 두 기기에서 오프라인으로 동시에 고치면 먼저 고친 쪽 내용은 사라집니다. 이 동작은 `test/sync_service_test.dart`의 충돌 테스트 2개로 확인했습니다.
-
-### 로컬 DB 변경 (MP2 → MP3)
-
-`todos` 테이블에 `updated_at`, `deleted`, `sync_status` 칼럼을 추가하고 DB 버전을 2로 올렸습니다. MP2를 쓰던 기기는 `onUpgrade`로 데이터를 그대로 둔 채 칼럼만 추가되고, 기존 항목은 첫 로그인 때 서버로 올라갑니다. 로그인한 사용자마다 로컬 DB 파일을 따로 둡니다(`scheduly_{uid}.db`).
+- **촬영하기**를 누르면 카메라 권한을 요청합니다. 거부하면 앱이 멈추지 않고 "🚫 카메라 권한이 필요합니다" 안내와 함께 **권한 다시 요청 / 갤러리에서 선택**을 보여 줍니다.
+- "다시 묻지 않음" 상태(영구 거부)면 **설정 열기**(앱 설정 화면) 버튼을 보여 줍니다.
+- 갤러리 선택은 시스템 사진 선택기를 써서 별도 권한이 필요 없으므로, 카메라를 거부해도 기능을 계속 쓸 수 있습니다.
 
 ## 구현 기능 목록
 
 | 기능 | 설명 | 위치 |
 |---|---|---|
-| 회원가입·로그인·로그아웃 | Firebase Authentication 이메일/비밀번호, 오류 문구 한국어 처리, 다시 실행하면 로그인 유지 | `lib/services/auth_service.dart`, `login_screen.dart` |
-| 기기 간 동기화 | 같은 계정의 할 일이 Firestore를 통해 모든 기기에 반영 (실시간 + 당겨서 새로고침) | `lib/data/sync_service.dart` |
-| 오프라인 작성 → 온라인 반영 | SQLite 대기열 + 연결 감지 후 자동 업로드 + 20초 재시도 | `SyncService`, `SqfliteTodoRepository` |
-| 충돌 처리 | 항목 단위 LWW, Firestore 트랜잭션, 삭제 표시 | `FirestoreTodoStore.pushIfNewer`, `applyRemote` |
-| 동기화 상태 배지 | ☁️ 서버와 동기화됨 / ⏳ 대기 n건 / 📴 오프라인 · 대기 n건 / ⚠️ 실패. 누르면 즉시 동기화 | `_SyncBadge` |
-| 설정 키 분리 | `.env` → `--dart-define-from-file`, `.env.example`만 커밋 | `lib/config/env.dart` |
-| 보안 규칙 | 본인 `uid` 경로만 읽기·쓰기 허용 | `firebase/firestore.rules` |
-| (MP2 유지) CRUD·필터 | 추가·수정·완료·삭제(되돌리기), 전체/미완료/완료 필터 | `home_screen.dart` |
+| **메모 스캔 탭** | 하단 탭 「📷 메모 스캔」 (기존 손글씨 시안 화면을 대체) | `lib/screens/memo_scan_screen.dart` |
+| 촬영/선택 | 카메라 촬영, 시스템 사진 선택기 | `lib/ocr/photo_source.dart` |
+| 온디바이스 OCR | ML Kit 한국어+라틴, 처리 시간 측정, 사진 즉시 삭제 | `lib/ocr/memo_ocr_service.dart` |
+| 후보 추출 | 줄 단위 정리(글머리표·번호 제거, 중복 제거 등) | `lib/ocr/memo_parser.dart` |
+| 검토·수정·선택 저장 | 체크박스, 바로 고치는 입력칸, 모두 선택/해제, 다시 찍기, 선택한 것만 저장 | `MemoScanScreen` |
+| 권한 거부 안내 | 다시 요청 / 설정 열기 / 갤러리 대안 | `_PermissionNotice` |
+| (MP1~3 유지) | 할 일 CRUD·필터, SQLite 저장, Firebase 동기화(오프라인 대기열·LWW 충돌 처리) | `home_screen.dart`, `lib/data/` |
 
 ## 확인 방법
 
-### 기기 A에서 추가 → 기기 B 새로고침 후 표시
+### 촬영/선택 화면
 
-- 조작: 두 에뮬레이터에서 같은 테스트 계정으로 로그인한다. 기기 A에서 `+`를 눌러 "Added on device A"를 추가한 뒤, 기기 B에서 목록을 아래로 당겨 새로고침한다
-- 기대 결과: 기기 A 배지가 「☁️ 서버와 동기화됨」으로 돌아오고, 기기 B 목록에 "Added on device A"가 나타난다 (전체 1)
-- 스크린샷: 01_deviceA_added.png, 02_deviceB_synced.png
+- 조작: 하단 탭 「📷 메모 스캔」을 누르고 「갤러리에서 선택」을 눌러 `memo_fixture.png`를 고른 뒤 **완료(Done)**를 누른다
+- 기대 결과: 촬영하기/갤러리에서 선택 버튼과 온디바이스 안내가 보이고, 시스템 사진 선택기에 "고른 사진에만 접근" 안내와 메모 사진이 보인다
+- 스크린샷: 01_scan_start.png, 02_pick.png
 
-### 오프라인 작성 → 온라인 복귀 후 서버 반영
+### 사진 → 항목 후보 → 선택 저장
 
-- 조작: 기기 A를 비행기 모드로 바꾸고(`adb -s emulator-5554 shell cmd connectivity airplane-mode enable`) "Written while offline"을 추가한다. 기기 B를 새로고침한다. 그다음 기기 A의 비행기 모드를 끄고(`… airplane-mode disable`) 기기 B를 다시 새로고침한다
-- 기대 결과: 오프라인인 기기 A에는 항목이 바로 보이고 배지가 「📴 오프라인 · 대기 1건」이다. 이때 기기 B에는 아직 없다. 비행기 모드를 끄면 기기 A 배지가 「☁️ 서버와 동기화됨」으로 바뀌고, 기기 B에도 "Written while offline"이 나타난다 (전체 2)
-- 스크린샷: 03_offline_pending.png, 04_deviceB_before.png, 05_online_synced.png, 06_deviceB_after.png
+- 조작: 인식이 끝나면 검토 화면에서 「오늘 할 일」(제목 줄)의 체크를 끄고, 「우유 사기」 끝에 " 2L"을 붙인 뒤 **선택한 5개 추가**를 누른다
+- 기대 결과: 후보 6개(오늘 할 일 / 우유 사기 / 알고리즘 과제 제출 / 도서관 책 반납 / 운동 30분 / Buy printer paper)가 보이고, 수정·해제가 반영된 5개가 홈 목록 맨 위에 메모 순서대로 추가된다. "메모에서 할 일 5개를 추가했습니다" 스낵바가 뜬다
+- 스크린샷: 03_review.png, 04_review_edited.png, 05_added_list.png
 
-### 백엔드 콘솔
+### 비행기 모드에서 인식
 
-- 조작: Firebase 콘솔 → Firestore Database → 데이터에서 `users/{uid}/todos`를 연다
-- 기대 결과: 앱에서 추가한 두 항목이 문서(`text`, `done`, `updatedAt`, `deleted` 등)로 저장되어 있다
-- 스크린샷: 07_backend_console.png
+- 조작: 위 과정을 비행기 모드에서 진행한다 (`adb shell cmd connectivity airplane-mode enable`)
+- 기대 결과: 상태 표시줄에 ✈️가 있는 상태에서도 인식이 2.52초 만에 끝나고 후보가 나온다. 저장한 항목은 「📴 오프라인 · 대기 5건」으로 표시되었다가, 로그인 상태라면 비행기 모드를 끄면 서버에 반영된다
+- 스크린샷: 01_scan_start.png, 03_review.png, 05_added_list.png (상태 표시줄 ✈️)
 
-### 충돌 처리 (자동 테스트)
+### 원본 사진 미저장
 
-- 조작: `flutter test test/sync_service_test.dart`
-- 기대 결과: 기기 A→B 동기화, 오프라인 대기열, 충돌 2종(LWW), 삭제 전파, 서버 오류 후 재시도, MP2 DB 업그레이드 등 7개 시나리오가 모두 통과한다
-- 스크린샷: 없음 (터미널 결과)
+- 조작: 인식·저장 후 `adb shell run-as com.example.scheduly_app find /data/data/com.example.scheduly_app -type f`를 실행한다
+- 기대 결과: 사진 파일(jpg/png/heic/webp)이 하나도 없다. 검토 화면에 "원본 사진은 삭제되었습니다"가 보인다
+- 스크린샷: 03_review.png
 
-시험 데이터: 앱에서 직접 입력한 더미 할 일 "Added on device A", "Written while offline" / 테스트 계정은 회원가입 화면에서 만든 더미 이메일(실제 개인 메일 아님)
+### 권한 거부 안내
 
-네트워크: 필요 (온라인 상태에서 동기화 확인). 오프라인 확인은 에뮬레이터 비행기 모드로 진행
+- 조작: `adb shell pm revoke com.example.scheduly_app android.permission.CAMERA`로 권한을 지운 뒤 「촬영하기」를 누르고, 시스템 창에서 **허용 안함(Don't allow)**을 누른다
+- 기대 결과: 앱이 종료되지 않고 "🚫 카메라 권한이 필요합니다" 안내와 「권한 다시 요청」·「갤러리에서 선택」 버튼이 보인다
+- 스크린샷: 06_permission_request.png, 07_permission_denied.png
+
+### 처리 시간 측정값
+
+- 조작: 같은 픽스처로 비행기 모드 4회, 온라인 3회 인식한다
+- 기대 결과: 검토 화면 상단에 "인식 n.nn초 (전체 n.nn초) · 기기 내 처리"가 표시되고, 측정값은 위 표와 같다
+- 스크린샷: 03_review.png
+
+시험 데이터: `tools/make_memo_fixture.py`로 만든 합성 메모 이미지 `fixtures/memo_fixture.png`(개인정보 없음, 제출물에 포함하지 않음)
+
+네트워크: 불필요 (비행기 모드에서 확인). 서버 동기화 확인에만 온라인 필요
+
+## MP3 동기화 (요약)
+
+- Firebase Authentication(이메일/비밀번호) + Cloud Firestore `users/{uid}/todos/{id}`, 보안 규칙으로 본인 데이터만 접근 (`firebase/firestore.rules`)
+- 로컬 SQLite가 기준이고, 변경은 `sync_status=pending` 대기열 → 온라인이면 업로드, 서버 변경은 실시간 리스너·새로고침으로 받음
+- 충돌: 항목 단위 **마지막 수정 우선(LWW)**, Firestore 트랜잭션으로 더 최신 값만 기록, 삭제는 삭제 표시(tombstone)로 전파
+- 설정 키는 `.env`(커밋 안 함) → `--dart-define-from-file`, 제출물에는 `.env.example`만 포함
 
 ## 개인정보
 
-- 앱 화면과 소스의 이름·계정은 모두 더미 값입니다. 회원가입에서 실명을 받지 않도록 이름 칸을 없앴습니다.
-- API 키·테스트 계정 비밀번호는 소스·커밋·제출물에 없습니다(`.env`, `.env.test`는 `.gitignore`).
+- 테스트에는 개인정보 없는 합성 메모 픽스처만 썼고, 원본 사진은 제출하지 않았습니다(`fixtures/`는 `.gitignore`).
+- 앱 화면·소스의 이름·계정은 모두 더미 값이고, API 키·비밀번호는 소스·커밋·제출물에 없습니다.
 
 ## AI 도구 사용
 

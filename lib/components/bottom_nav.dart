@@ -15,7 +15,7 @@ const List<TabItem> tabs = [
   TabItem(id: ActiveScreen.home, label: '홈', icon: '🏠'),
   TabItem(id: ActiveScreen.calendar, label: '캘린더', icon: '📅'),
   TabItem(id: ActiveScreen.group, label: '단체', icon: '👥'),
-  TabItem(id: ActiveScreen.handwriting, label: '손글씨', icon: '✍️'),
+  TabItem(id: ActiveScreen.handwriting, label: '메모 스캔', icon: '📷'),
 ];
 
 class BottomNav extends StatelessWidget {

@@ -17,7 +17,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TOP_LEVEL = ("README.md", "prompts_log.md")
-EXCLUDE_PREFIX = ("screenshots/", "tools/")
+EXCLUDE_PREFIX = ("screenshots/",)
 MAX_SHOT_BYTES = 2 * 1024 * 1024
 MAX_SHOTS = 12
 

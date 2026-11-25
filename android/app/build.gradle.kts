@@ -47,3 +47,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // MP4: ML Kit 한국어 텍스트 인식 모델 (번들형: 앱 안에 포함 → 비행기 모드에서도 동작)
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+}

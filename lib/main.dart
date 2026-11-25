@@ -5,7 +5,8 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/calendar_screen.dart';
 import 'screens/group_schedule_screen.dart';
-import 'screens/handwriting_screen.dart';
+import 'screens/memo_scan_screen.dart';
+import 'ocr/memo_ocr_service.dart';
 import 'components/bottom_nav.dart';
 import 'services/app_services.dart';
 
@@ -24,6 +25,8 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // .env(--dart-define-from-file)에 Firebase 값이 있으면 초기화, 없으면 로컬 전용 모드
   await AppServices.init();
+  // 프라이버시: 이전 실행에서 남았을 수 있는 임시 사진을 앱 시작 시 정리
+  await PhotoDisposal.purgePickerCache();
   runApp(const MyApp());
 }
 
@@ -130,7 +133,10 @@ class _AppRootState extends State<AppRoot> {
       case ActiveScreen.group:
         return const GroupScheduleScreen();
       case ActiveScreen.handwriting:
-        return const HandwritingScreen();
+        // MP4: 손글씨 시안 화면 → 실제 온디바이스 OCR 메모 가져오기
+        return MemoScanScreen(
+          onAdded: (_) => setState(() => _activeScreen = ActiveScreen.home),
+        );
     }
   }
 }
